@@ -20,12 +20,14 @@ jobs:
       - name: Create local tap
         run: |
           set -euo pipefail
+          git config --global user.name github-actions
+          git config --global user.email github-actions@github.com
           brew tap-new xtruder/tap
           repo="$(brew --repo xtruder/tap)"
           cp Formula/notify-relay.rb "$repo/Formula/notify-relay.rb"
 
       - name: Install formula from local tap
-        run: brew install --build-from-source xtruder/tap/notify-relay
+        run: brew install --build-from-source --HEAD xtruder/tap/notify-relay
 
       - name: Verify binaries
         run: |
