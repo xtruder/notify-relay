@@ -14,6 +14,7 @@ It also ships with:
 - a user-level systemd unit at `packaging/systemd/notify-relayd.service`
 - a release installer at `scripts/install.sh`
 - a Homebrew/Linuxbrew formula at `Formula/notify-relay.rb`
+- a tap formula template at `packaging/homebrew/notify-relay.rb.tpl`
 
 ## Features
 
@@ -57,10 +58,16 @@ The installer places:
 From a tap or local checkout:
 
 ```bash
+brew tap xtruder/tap
+brew install notify-relay
+
+# or from a local checkout while iterating on the formula
 brew install --HEAD ./Formula/notify-relay.rb
 ```
 
 This builds `notify-relayd`, `notify-send-proxy`, and installs a `notify-send` symlink. The proxy is useful on Linux and macOS clients; the relay is intended for Linux hosts.
+
+Tagged releases automatically update the `xtruder/homebrew-tap` tap repo using the release workflow.
 
 ## Host usage
 
