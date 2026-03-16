@@ -7,6 +7,7 @@
 
 ## Features
 
+- single binary tools with no external runtime dependencies
 - forwards notifications over Unix sockets or TCP
 - defaults to `/run/user/<uid>/notify-relay.sock` on Linux when available
 - supports `notify-send` urgency, icons, categories, hints, replacement IDs, actions, `--wait`, and `--print-id`
