@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/xtruder/notify-relay/main/scripts/i
 Useful flags:
 
 ```bash
-bash install.sh --version v0.1.0
+bash install.sh --version v0.1.1
 bash install.sh --no-systemd
 bash install.sh --install-dir ~/.local/bin
 ```
@@ -50,8 +50,13 @@ The installer places:
 
 - `notify-relayd` in `~/.local/bin`
 - `notify-send-proxy` in `~/.local/bin`
-- `notify-send` symlinked to `notify-send-proxy`
 - `notify-relayd.service` in `~/.config/systemd/user`
+
+If you want the proxy to replace `notify-send`, create the symlink yourself:
+
+```bash
+ln -sfn ~/.local/bin/notify-send-proxy ~/.local/bin/notify-send
+```
 
 ## Install with Homebrew or Linuxbrew
 
@@ -65,7 +70,7 @@ brew install notify-relay
 brew install --HEAD ./Formula/notify-relay.rb
 ```
 
-This builds `notify-relayd`, `notify-send-proxy`, and installs a `notify-send` symlink. The proxy is useful on Linux and macOS clients; the relay is intended for Linux hosts.
+This builds `notify-relayd` and `notify-send-proxy`. If you want the proxy to replace `notify-send`, create a symlink yourself after installation. The proxy is useful on Linux and macOS clients; the relay is intended for Linux hosts.
 
 Tagged releases automatically update the `xtruder/homebrew-tap` tap repo using the release workflow.
 

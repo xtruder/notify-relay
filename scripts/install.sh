@@ -17,7 +17,6 @@ Options:
   --install-dir <dir>     Binary install directory, default: ~/.local/bin
   --systemd-dir <dir>     User systemd directory, default: ~/.config/systemd/user
   --no-systemd            Skip installing the systemd user service
-  --no-proxy-link         Skip linking notify-send -> notify-send-proxy
   -h, --help              Show this help
 
 Environment:
@@ -72,13 +71,10 @@ download_release() {
 }
 
 install_files() {
-  local release_dir="$1" install_systemd="$2" link_proxy="$3"
+  local release_dir="$1" install_systemd="$2"
   mkdir -p "$INSTALL_DIR"
   install -m755 "$release_dir/notify-relayd" "$INSTALL_DIR/notify-relayd"
   install -m755 "$release_dir/notify-send-proxy" "$INSTALL_DIR/notify-send-proxy"
-  if [[ "$link_proxy" == "1" ]]; then
-    ln -sfn "$INSTALL_DIR/notify-send-proxy" "$INSTALL_DIR/notify-send"
-  fi
   if [[ "$install_systemd" == "1" ]]; then
     mkdir -p "$SYSTEMD_DIR"
     install -m644 "$release_dir/packaging/systemd/notify-relayd.service" "$SYSTEMD_DIR/notify-relayd.service"
@@ -91,7 +87,6 @@ main() {
   need install
 
   local install_systemd=1
-  local link_proxy=1
   local detected_os
 
   detected_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -117,10 +112,6 @@ main() {
         install_systemd=0
         shift
         ;;
-      --no-proxy-link)
-        link_proxy=0
-        shift
-        ;;
       -h|--help)
         usage
         exit 0
@@ -141,7 +132,7 @@ main() {
 
   printf 'Installing %s for %s/%s into %s\n' "$version" "$os" "$arch" "$INSTALL_DIR"
   release_dir="$(download_release "$version" "$os" "$arch" "$tmpdir")"
-  install_files "$release_dir" "$install_systemd" "$link_proxy"
+  install_files "$release_dir" "$install_systemd"
 
   cat <<EOF
 Installed:
@@ -149,9 +140,12 @@ Installed:
   $INSTALL_DIR/notify-send-proxy
 EOF
 
-  if [[ "$link_proxy" == "1" ]]; then
-    printf '  %s/notify-send -> notify-send-proxy\n' "$INSTALL_DIR"
-  fi
+  cat <<EOF
+
+Optional symlink if you want this proxy to replace notify-send:
+  ln -sfn "$INSTALL_DIR/notify-send-proxy" "$INSTALL_DIR/notify-send"
+EOF
+
   if [[ "$install_systemd" == "1" ]]; then
     cat <<EOF
 
