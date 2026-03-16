@@ -1,0 +1,26 @@
+name: Brew
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  brew-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install formula from source
+        run: brew install --build-from-source ./Formula/notify-relay.rb
+
+      - name: Verify binaries
+        run: |
+          notify-send --version
+          notify-relayd --version 2>&1 | grep 'notify-relayd version='

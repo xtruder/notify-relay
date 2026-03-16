@@ -1,0 +1,14 @@
+[Unit]
+Description=notify-relay host service
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/notify-relay/notify-relayd.env
+ExecStart=%h/.local/bin/notify-relayd --listen 127.0.0.1:8787 --token-file %h/.config/notify-relay/token
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

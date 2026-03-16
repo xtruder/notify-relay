@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          out="notify-relay_${VERSION#v}_${GOOS}_${GOARCH}"
+          work="dist/${out}"
+          mkdir -p "$work/packaging/systemd"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X github.com/xtruder/notify-relay/internal/buildinfo.Version=${VERSION} -X github.com/xtruder/notify-relay/internal/buildinfo.Commit=${COMMIT} -X github.com/xtruder/notify-relay/internal/buildinfo.Date=${DATE}"
+          go build -ldflags "$LDFLAGS" -o "$work/notify-relayd" ./cmd/notify-relayd
+          go build -ldflags "$LDFLAGS" -o "$work/notify-send-proxy" ./cmd/notify-send-proxy
+          cp packaging/systemd/notify-relayd.service "$work/packaging/systemd/notify-relayd.service"
+          tar -C dist -czf "dist/${out}.tar.gz" "$out"
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find dist -name '*.tar.gz' -exec cp {} release/ \;
+          (cd release && sha256sum *.tar.gz > checksums.txt)
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.tar.gz
+            release/checksums.txt
