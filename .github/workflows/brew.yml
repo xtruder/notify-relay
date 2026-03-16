@@ -31,5 +31,5 @@ jobs:
 
       - name: Verify binaries
         run: |
-          notify-send --version
+          notify-send-proxy --version
           notify-relayd --version 2>&1 | grep 'notify-relayd version='
