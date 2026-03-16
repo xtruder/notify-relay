@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -39,12 +42,8 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 
-	endpoint := os.Getenv("NOTIFY_RELAY_URL")
-	if endpoint == "" {
-		endpoint = "http://127.0.0.1:8787"
-	}
-
-	resp, err := send(endpoint, os.Getenv("NOTIFY_RELAY_TOKEN"), parsed.Request)
+	endpoint, socketPath := relayTarget()
+	resp, err := send(endpoint, socketPath, os.Getenv("NOTIFY_RELAY_TOKEN"), parsed.Request)
 	if err != nil {
 		if os.Getenv("NOTIFY_SEND_FALLBACK") == "1" {
 			return fallbackNotifySend(args)
@@ -255,10 +254,38 @@ func parseAction(raw string, index int) (string, string) {
 	return fmt.Sprintf("action%d", index+1), raw
 }
 
-func send(endpoint, token string, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
+func relayTarget() (string, string) {
+	if socketPath := os.Getenv("NOTIFY_RELAY_SOCKET"); socketPath != "" {
+		return "http://notify-relay", socketPath
+	}
+	if runtime.GOOS == "linux" {
+		socketPath := fmt.Sprintf("/run/user/%d/notify-relay.sock", os.Getuid())
+		if _, err := os.Stat(socketPath); err == nil {
+			return "http://notify-relay", socketPath
+		}
+	}
+	endpoint := os.Getenv("NOTIFY_RELAY_URL")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:8787"
+	}
+	return endpoint, ""
+}
+
+func send(endpoint, socketPath, token string, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return protocol.NotifyResponse{}, fmt.Errorf("encode request: %w", err)
+	}
+	client := http.DefaultClient
+	if socketPath != "" {
+		client = &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, "unix", socketPath)
+				},
+			},
+		}
 	}
 	httpReq, err := http.NewRequest(http.MethodPost, strings.TrimRight(endpoint, "/")+"/notify", bytes.NewReader(body))
 	if err != nil {
@@ -268,7 +295,7 @@ func send(endpoint, token string, req protocol.NotifyRequest) (protocol.NotifyRe
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return protocol.NotifyResponse{}, fmt.Errorf("send request: %w", err)
 	}
@@ -336,7 +363,8 @@ func printHelp() {
 Drop-in notify-send proxy for a remote notification relay.
 
 Environment:
-  NOTIFY_RELAY_URL    Relay base URL (default: http://127.0.0.1:8787)
+  NOTIFY_RELAY_SOCKET Relay Unix socket path
+  NOTIFY_RELAY_URL    Relay base URL (default fallback: http://127.0.0.1:8787)
   NOTIFY_RELAY_TOKEN  Optional bearer token
   NOTIFY_SEND_FALLBACK=1  Fall back to local notify-send if relay fails
 

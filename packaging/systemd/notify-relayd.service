@@ -6,7 +6,7 @@ Wants=graphical-session.target
 [Service]
 Type=simple
 EnvironmentFile=-%h/.config/notify-relay/notify-relayd.env
-ExecStart=%h/.local/bin/notify-relayd --listen 127.0.0.1:8787 --token-file %h/.config/notify-relay/token
+ExecStart=%h/.local/bin/notify-relayd --unix %t/notify-relay.sock
 Restart=on-failure
 RestartSec=2
 

@@ -22,6 +22,7 @@ It also ships with:
 - supports app name, icon, urgency, category, timeout, replacement ids, transient notifications, typed hints, action buttons, printing ids, and waiting for close/action events
 - can listen on TCP or a Unix socket
 - auto-generates a bearer token for TCP listeners unless you provide one; Unix sockets default to no token
+- on Linux, the proxy automatically prefers `/run/user/<uid>/notify-relay.sock` when it exists
 
 ## Build
 
@@ -52,6 +53,8 @@ The installer places:
 - `notify-send-proxy` in `~/.local/bin`
 - `notify-relayd.service` in `~/.config/systemd/user`
 
+The packaged systemd unit listens on the Unix socket `%t/notify-relay.sock`, which resolves to `/run/user/<uid>/notify-relay.sock`.
+
 If you want the proxy to replace `notify-send`, create the symlink yourself:
 
 ```bash
@@ -79,8 +82,10 @@ Tagged releases automatically update the `xtruder/homebrew-tap` tap repo using t
 Run the relay as the desktop user so it can reach the session bus:
 
 ```bash
-notify-relayd --listen 127.0.0.1:8787 --token-file ~/.config/notify-relay/token
+notify-relayd --unix /run/user/$(id -u)/notify-relay.sock
 ```
+
+This is the default used by the packaged systemd unit.
 
 If `~/.config/notify-relay/token` does not exist yet, `notify-relayd` generates one automatically, writes it with mode `0600`, and uses it for the TCP listener.
 
@@ -103,7 +108,7 @@ The repository includes this unit as `packaging/systemd/notify-relayd.service`:
 Description=notify-relay host service
 
 [Service]
-ExecStart=%h/.local/bin/notify-relayd --listen 127.0.0.1:8787 --token-file %h/.config/notify-relay/token
+ExecStart=%h/.local/bin/notify-relayd --unix %t/notify-relay.sock
 Restart=on-failure
 
 [Install]
@@ -123,11 +128,17 @@ systemctl --user enable --now notify-relayd.service
 Set the relay endpoint and token:
 
 ```bash
+export NOTIFY_RELAY_SOCKET=/run/user/$(id -u)/notify-relay.sock
+```
+
+When that socket exists on Linux, `notify-send-proxy` uses it automatically even without `NOTIFY_RELAY_SOCKET`.
+
+For TCP mode instead:
+
+```bash
 export NOTIFY_RELAY_URL=http://HOST_IP:8787
 export NOTIFY_RELAY_TOKEN=$(cat ~/.config/notify-relay/token)
 ```
-
-If you use a Unix socket on the host and share it into the guest, you can skip `NOTIFY_RELAY_TOKEN` entirely.
 
 Then either call the proxy directly:
 
@@ -149,7 +160,32 @@ If you prefer a custom command hook, point it at `notify-send-proxy` with the sa
 
 ## SSH forwarding examples
 
-### Remote forward from a Linux host into a VM
+### Remote forward a Unix socket from a Linux host into a VM
+
+If `notify-relayd` runs on your local Linux host and listens on `/run/user/1000/notify-relay.sock`, you can forward it into the VM with a socket-style `RemoteForward`:
+
+```sshconfig
+Host ubuntu-dev
+  HostName ubuntu-dev
+  User offlinehq
+  StreamLocalBindUnlink yes
+  RemoteForward /run/user/1000/notify-relay.sock /run/user/1000/notify-relay.sock
+  ExitOnForwardFailure yes
+```
+
+This follows the same pattern as:
+
+```sshconfig
+RemoteForward /run/user/1000/gnupg/S.gpg-agent /run/user/1000/gnupg/S.gpg-agent.extra
+```
+
+Then inside the VM:
+
+```bash
+export NOTIFY_RELAY_SOCKET=/run/user/1000/notify-relay.sock
+```
+
+### Remote forward from a Linux host into a VM over TCP
 
 If `notify-relayd` runs on your local Linux host and you SSH from that host into a VM, use `RemoteForward` so the VM gets a loopback port that tunnels back to the host relay:
 
