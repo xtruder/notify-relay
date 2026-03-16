@@ -56,7 +56,7 @@ platform() {
     arm64|aarch64) arch="arm64" ;;
     *) printf 'unsupported architecture: %s\n' "$arch" >&2; exit 1 ;;
   esac
-  printf '%s %s' "$os" "$arch"
+  printf '%s %s\n' "$os" "$arch"
 }
 
 download_release() {
@@ -128,7 +128,7 @@ main() {
   local version tmpdir release_dir
   version="$(resolve_version)"
   tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
+  trap "rm -rf \"$tmpdir\"" EXIT
 
   printf 'Installing %s for %s/%s into %s\n' "$version" "$os" "$arch" "$INSTALL_DIR"
   release_dir="$(download_release "$version" "$os" "$arch" "$tmpdir")"
