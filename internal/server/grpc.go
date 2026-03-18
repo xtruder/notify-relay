@@ -7,9 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
-	"github.com/xtruder/notify-relay/internal/channel"
 	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
 	"github.com/xtruder/notify-relay/internal/remotes"
@@ -89,6 +87,14 @@ func (s *GRPCServer) Serve() error {
 	return s.grpcServer.Serve(s.listener)
 }
 
+// Address returns the server address (for tests)
+func (s *GRPCServer) Address() string {
+	if s.listener == nil {
+		return ""
+	}
+	return s.listener.Addr().String()
+}
+
 // Shutdown gracefully stops the server
 func (s *GRPCServer) Shutdown(ctx context.Context) error {
 	s.grpcServer.GracefulStop()
@@ -104,94 +110,18 @@ func (s *GRPCServer) Shutdown(ctx context.Context) error {
 }
 
 // Notify handles incoming notification requests from proxy
+// The router handles all routing logic including remote forwarding and fallback
 func (s *GRPCServer) Notify(ctx context.Context, req *notify_relayv1.Notification) (*notify_relayv1.NotificationResponse, error) {
 	// Convert proto to protocol request
 	protocolReq := protoToProtocol(req)
 
-	// Try local routing first
+	// Router handles everything including remote forwarding with timeout and fallback
 	resp, err := s.router.Notify(ctx, protocolReq)
 	if err != nil {
-		// Check if we should forward to remote
-		if forwardErr, ok := err.(router.ErrForwardToRemote); ok {
-			// Forward to remote client
-			client, exists := s.manager.GetRemote(forwardErr.Hostname)
-			if !exists {
-				return nil, status.Errorf(codes.Unavailable, "remote client %s disconnected", forwardErr.Hostname)
-			}
-
-			forwarded := &notify_relayv1.ForwardedNotification{
-				SourceHostname: "server",
-				Notification:   req,
-			}
-
-			_, err := s.manager.ForwardNotification(ctx, forwardErr.Hostname, forwarded)
-			if err != nil {
-				// Remote failed, fall back to local routing
-				log.Printf("Remote %s failed, falling back to local: %v", forwardErr.Hostname, err)
-				return s.routeLocally(ctx, protocolReq)
-			}
-
-			// Wait for client response
-			select {
-			case resp := <-client.ResponseChan:
-				return &notify_relayv1.NotificationResponse{
-					Id:        resp.Id,
-					Event:     resp.Event,
-					Reason:    resp.Reason,
-					ActionKey: resp.ActionKey,
-				}, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(30 * time.Second):
-				return nil, status.Errorf(codes.DeadlineExceeded, "timeout waiting for remote response")
-			}
-		}
-
 		return nil, status.Errorf(codes.Internal, "notify failed: %v", err)
 	}
 
 	return protocolToProto(resp), nil
-}
-
-// routeLocally routes a notification using only local channels (skips remote conditions)
-func (s *GRPCServer) routeLocally(ctx context.Context, req protocol.NotifyRequest) (*notify_relayv1.NotificationResponse, error) {
-	// Find first local route that matches (skip remote_* conditions)
-	routes := []struct {
-		condition string
-		channel   string
-	}{
-		{"screen_locked", "phone"},
-		{"always", "dbus"},
-	}
-
-	for _, route := range routes {
-		switch route.condition {
-		case "screen_locked":
-			// Check lock state from router's condition evaluator
-			// For now, just try the channel directly
-			// TODO: Get lock state from condition evaluator
-		case "always":
-			// Always try this channel
-		}
-
-		ch, ok := s.getChannel(route.channel)
-		if ok {
-			resp, err := ch.Send(ctx, req)
-			if err != nil {
-				continue // Try next channel
-			}
-			return protocolToProto(resp), nil
-		}
-	}
-
-	return nil, status.Errorf(codes.Internal, "no local route available")
-}
-
-func (s *GRPCServer) getChannel(name string) (channel.Channel, bool) {
-	// This needs access to router channels
-	// For now, we'll use the router's Notify but with modified behavior
-	// TODO: Implement proper channel access
-	return nil, false
 }
 
 // CloseNotification handles close requests

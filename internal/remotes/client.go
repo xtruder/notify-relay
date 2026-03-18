@@ -218,10 +218,26 @@ func (c *Client) handleServerMessage(msg *notify_relayv1.ServerMessage) error {
 		// Received forwarded notification from server
 		c.mu.RLock()
 		onNotification := c.onNotification
+		stream := c.stream
 		c.mu.RUnlock()
 
 		if onNotification != nil {
 			onNotification(m.Notification)
+		}
+
+		// Send acknowledgment response back to server
+		if stream != nil {
+			resp := &notify_relayv1.ClientMessage{
+				Message: &notify_relayv1.ClientMessage_Response{
+					Response: &notify_relayv1.NotificationResponse{
+						Id:    1, // Simple ack ID
+						Event: "ack",
+					},
+				},
+			}
+			if err := stream.Send(resp); err != nil {
+				log.Printf("Failed to send notification ack: %v", err)
+			}
 		}
 
 	case *notify_relayv1.ServerMessage_ClientList:

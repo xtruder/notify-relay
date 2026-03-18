@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/xtruder/notify-relay/internal/channel"
 	"github.com/xtruder/notify-relay/internal/condition"
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
 	"github.com/xtruder/notify-relay/internal/remotes"
 )
@@ -19,16 +21,18 @@ type Route struct {
 
 // Config holds router configuration
 type Config struct {
-	Routes []Route `json:"routes"`
+	Routes        []Route       `json:"routes"`
+	RemoteTimeout time.Duration `json:"remote_timeout,omitempty"` // Timeout for remote forwarding (default: 30s)
 }
 
 // Router routes notifications to appropriate channels based on conditions
 type Router struct {
-	config     Config
-	channels   map[string]channel.Channel
-	conditions map[string]condition.Condition
-	manager    *remotes.Manager
-	mu         sync.RWMutex
+	config        Config
+	channels      map[string]channel.Channel
+	conditions    map[string]condition.Condition
+	manager       *remotes.Manager
+	mu            sync.RWMutex
+	remoteTimeout time.Duration
 }
 
 // New creates a new router with the given configuration, evaluator, and channels
@@ -37,6 +41,13 @@ func New(cfg Config, evaluator condition.Evaluator, channels []channel.Channel) 
 		config:     cfg,
 		channels:   make(map[string]channel.Channel, len(channels)),
 		conditions: make(map[string]condition.Condition),
+	}
+
+	// Set default remote timeout if not specified
+	if cfg.RemoteTimeout > 0 {
+		r.remoteTimeout = cfg.RemoteTimeout
+	} else {
+		r.remoteTimeout = 30 * time.Second
 	}
 
 	// Store channels by name
@@ -60,6 +71,13 @@ func NewWithRemotes(cfg Config, evaluator condition.Evaluator, channels []channe
 		channels:   make(map[string]channel.Channel, len(channels)),
 		conditions: make(map[string]condition.Condition),
 		manager:    manager,
+	}
+
+	// Set default remote timeout if not specified
+	if cfg.RemoteTimeout > 0 {
+		r.remoteTimeout = cfg.RemoteTimeout
+	} else {
+		r.remoteTimeout = 30 * time.Second
 	}
 
 	// Store channels by name
@@ -109,12 +127,14 @@ func (r *RemoteUnlockedCondition) Evaluate(ctx context.Context, req protocol.Not
 }
 
 // Notify routes a notification to the appropriate channel
+// For remote forwarding routes, it will wait for the remote response with timeout
+// If remote forwarding fails or times out, it falls back to the next matching route
 func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	// Evaluate routes in order, send to first matching channel
-	for _, route := range r.config.Routes {
+	for i, route := range r.config.Routes {
 		cond, ok := r.conditions[route.Condition]
 		if !ok {
 			continue
@@ -128,12 +148,12 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 		if !ok {
 			// Special case: "forward" channel means forward to remote
 			if route.Channel == "forward" && r.manager != nil {
-				remote := r.manager.FindBestRemote()
-				if remote != nil {
-					// Return a special response indicating remote forwarding
-					// The caller (server) handles the actual forwarding
-					return protocol.NotifyResponse{}, ErrForwardToRemote{Hostname: remote.Hostname}
+				resp, forwarded := r.tryForwardToRemote(ctx, req, i)
+				if forwarded {
+					return resp, nil
 				}
+				// Forwarding failed or timed out, continue to next route (fallback)
+				continue
 			}
 			continue
 		}
@@ -144,13 +164,48 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 	return protocol.NotifyResponse{}, fmt.Errorf("no matching route found")
 }
 
-// ErrForwardToRemote is returned when notification should be forwarded to a remote client
-type ErrForwardToRemote struct {
-	Hostname string
-}
+// tryForwardToRemote attempts to forward notification to best remote
+// Returns (response, true) if successful, (zero, false) if failed/timeout
+func (r *Router) tryForwardToRemote(ctx context.Context, req protocol.NotifyRequest, routeIndex int) (protocol.NotifyResponse, bool) {
+	remote := r.manager.FindBestRemote()
+	if remote == nil {
+		return protocol.NotifyResponse{}, false
+	}
 
-func (e ErrForwardToRemote) Error() string {
-	return fmt.Sprintf("forward to remote client: %s", e.Hostname)
+	// Create forwarded notification
+	forwarded := &notify_relayv1.ForwardedNotification{
+		SourceHostname: "server",
+		Notification: &notify_relayv1.Notification{
+			AppName:       req.AppName,
+			Summary:       req.Summary,
+			Body:          req.Body,
+			AppIcon:       req.AppIcon,
+			ExpireTimeout: req.ExpireTimeout,
+			Hints:         make(map[string]string),
+		},
+	}
+
+	// Add hints
+	for _, hint := range req.Hints {
+		forwarded.Notification.Hints[hint.Name] = hint.Value
+	}
+
+	// Forward with timeout
+	forwardCtx, cancel := context.WithTimeout(ctx, r.remoteTimeout)
+	defer cancel()
+
+	resp, err := r.manager.ForwardNotification(forwardCtx, remote.Hostname, forwarded)
+	if err != nil {
+		return protocol.NotifyResponse{}, false
+	}
+
+	// Response received successfully
+	return protocol.NotifyResponse{
+		ID:        resp.Id,
+		Event:     resp.Event,
+		Reason:    resp.Reason,
+		ActionKey: resp.ActionKey,
+	}, true
 }
 
 // CloseNotification closes a notification on all channels that support it
