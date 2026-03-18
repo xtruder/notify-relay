@@ -1,20 +1,35 @@
 {
-  "_comment": "Complete configuration example for notify-relay",
-  "mode": "standalone",
+  "_comment": "Unified configuration supporting multiple remotes (inbound and outbound)",
   
   "server": {
     "listen": "127.0.0.1:8787",
-    "unix": "/run/user/1000/notify-relay.sock",
-    "token": "optional-bearer-token"
+    "unix": "/run/user/1000/notify-relay.sock"
   },
   
-  "socket_watch": {
-    "_comment": "Watch for forwarded sockets from remote clients (SSH RemoteForward)",
-    "paths": [
-      "/run/user/1000/notify-relay.sock"
-    ],
-    "pattern": "/run/user/1000/notify-relay-*.sock"
-  },
+  "remotes": [
+    {
+      "_comment": "Inbound remote: watch for forwarded socket from laptop",
+      "name": "laptop-work",
+      "type": "inbound",
+      "socket": "/run/user/1000/notify-relay-laptop-work.sock",
+      "priority": 1
+    },
+    {
+      "_comment": "Inbound remote: pattern matching for multiple laptops",
+      "name": "laptop-personal",
+      "type": "inbound", 
+      "socket": "/run/user/1000/notify-relay-laptop-personal.sock",
+      "priority": 2
+    },
+    {
+      "_comment": "Outbound remote: connect to another server",
+      "name": "backup-server",
+      "type": "outbound",
+      "host": "backup.example.com:8787",
+      "token": "auth-token",
+      "priority": 3
+    }
+  ],
   
   "channels": {
     "dbus": {
@@ -24,8 +39,7 @@
       "type": "ntfy",
       "config": {
         "server": "https://ntfy.sh",
-        "topic": "my-laptop-notifications",
-        "token": "optional-ntfy-token"
+        "topic": "my-notifications"
       }
     }
   },
@@ -42,23 +56,6 @@
     {
       "condition": "always",
       "channel": "dbus"
-    }
-  ],
-  
-  "remote": {
-    "host": "server.example.com:8787",
-    "name": "laptop-work",
-    "token": "auth-token"
-  },
-  
-  "remotes": [
-    {
-      "name": "laptop-work",
-      "priority": 1
-    },
-    {
-      "name": "laptop-personal", 
-      "priority": 2
     }
   ]
 }

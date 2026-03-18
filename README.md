@@ -4,25 +4,26 @@ Distributed notification relay supporting desktop-to-desktop and desktop-to-phon
 
 ## Overview
 
-`notify-relay` forwards notifications between machines using gRPC. It supports three modes:
+`notify-relay` forwards notifications between machines using gRPC bidirectional streaming. Each daemon instance can:
 
-- **Standalone** (default): Local-only notifications with optional phone forwarding via ntfy.sh
-- **Server**: Accepts connections from remote clients (laptops) and routes intelligently
-- **Client**: Connects to a server and forwards lock state changes
+- Accept incoming connections from other machines (**inbound remotes**)
+- Connect to other machines (**outbound remotes**)
+- Route notifications intelligently based on remote lock state
+- Send notifications to local desktop (dbus) or phone (ntfy.sh)
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         SERVER                                  │
-│  ┌──────────┐    ┌──────────────┐    ┌─────────────────────┐  │
-│  │  Proxy   │───►│ gRPC Server  │───►│ Router              │  │
-│  └──────────┘    └──────────────┘    │ ├─ Remote unlocked   │  │
-│                                      │ ├─ Screen locked     │  │
-│  ┌──────────┐    ┌──────────────┐    │ └─ Always (dbus)   │  │
-│  │ Client A │◄──►│ Remote Mgr   │    └─────────────────────┘  │
-│  │ (laptop) │    └──────────────┘                            │
-│  └──────────┘                                                 │
+│                    MACHINE A (Office Desktop)                   │
+│  ┌──────────┐    ┌──────────────┐    ┌─────────────────────┐   │
+│  │  Proxy   │───►│ gRPC Server  │───►│ Router              │   │
+│  └──────────┘    └──────────────┘    │ ├─ Remote unlocked   │   │
+│                                      │ ├─ Screen locked     │   │
+│  ┌──────────┐    ┌──────────────┐    │ └─ Always (dbus)    │   │
+│  │ Outbound │───►│ Remote Mgr   │    └─────────────────────┘   │
+│  │ (backup) │    └──────────────┘                               │
+│  └──────────┘                                                   │
 └─────────────────────────────────────────────────────────────────┘
          ▲                           ▲
          │                           │
@@ -30,92 +31,53 @@ Distributed notification relay supporting desktop-to-desktop and desktop-to-phon
          │                           │
          ▼                           ▼
 ┌──────────────────┐         ┌──────────────────┐
-│   LAPTOP A       │         │   LAPTOP B       │
+│   MACHINE B      │         │   MACHINE C      │
+│ (Backup Server)  │         │ (Laptop at home) │
 │ ┌──────────────┐ │         │ ┌──────────────┐ │
-│ │ gRPC Client  │ │         │ │ gRPC Client  │ │
-│ │ Lock Reporter│ │         │ │ Lock Reporter│ │
-│ └──────────────┘ │         │ └──────────────┘ │
-│ ┌──────────────┐ │         │ ┌──────────────┐ │
-│ │ Local Router │ │         │ │ Local Router │ │
-│ │ ├─ dbus      │ │         │ │ ├─ dbus      │ │
-│ │ └─ ntfy      │ │         │ │ └─ ntfy      │ │
-│ └──────────────┘ │         │ └──────────────┘ │
+│ │ gRPC Server  │ │         │ │ gRPC Client  │ │
+│ └──────────────┘ │         │ │ (connects)   │ │
 └──────────────────┘         └──────────────────┘
 ```
 
-## Modes
-
-### Standalone Mode (Default)
-
-Simple local-only operation with smart routing:
+## Quick Start
 
 ```bash
-# Basic - notifications only on local desktop
+# Simple local-only notifications
 notify-relayd
 
-# With phone notifications when locked
+# With phone notifications when screen locked
 notify-relayd --ntfy-topic my-phone
 
-# Or with config file
+# Full distributed setup with config
 notify-relayd --config ~/.config/notify-relay.conf
 ```
 
-### Server Mode
-
-Accepts connections from remote clients and routes intelligently:
-
-```bash
-notify-relayd --mode server --listen 0.0.0.0:8787
-```
-
-When a client is connected and unlocked, notifications go to the client. When locked or disconnected, they go to local channels (ntfy/dbus).
-
-### Client Mode
-
-Connects to a server and reports lock state:
-
-```bash
-notify-relayd --mode client --remote-host server.example.com:8787
-```
-
-The client:
-1. Maintains persistent gRPC connection to server
-2. Reports screen lock/unlock events
-3. Auto-reconnects on disconnect
-4. Receives forwarded notifications from server
-5. Routes locally based on its own lock state
-
 ## Configuration
 
-### Config File
+Default config location: `~/.config/notify-relay.conf`
 
-Default location: `~/.config/notify-relay.conf`
+### Minimal Example (local only)
 
-**Standalone Example:**
 ```json
 {
-  "mode": "standalone",
   "server": {
     "unix": "/run/user/1000/notify-relay.sock"
   },
   "channels": {
-    "dbus": { "type": "dbus" },
-    "phone": {
-      "type": "ntfy",
-      "config": { "topic": "my-alerts" }
-    }
+    "dbus": { "type": "dbus" }
   },
   "routes": [
-    { "condition": "screen_locked", "channel": "phone" },
     { "condition": "always", "channel": "dbus" }
   ]
 }
 ```
 
-**Server Example:**
+### Server with Inbound Remotes
+
+Accepts connections from laptops via forwarded sockets:
+
 ```json
 {
-  "mode": "server",
   "server": {
     "listen": "0.0.0.0:8787",
     "token": "secret-token"
@@ -133,20 +95,30 @@ Default location: `~/.config/notify-relay.conf`
     { "condition": "always", "channel": "dbus" }
   ],
   "remotes": [
-    { "name": "laptop-work", "priority": 1 },
-    { "name": "laptop-personal", "priority": 2 }
+    {
+      "name": "laptop-work",
+      "type": "inbound",
+      "socket": "/run/user/1000/notify-relay-laptop-work.sock",
+      "priority": 1
+    },
+    {
+      "name": "laptop-personal",
+      "type": "inbound",
+      "socket": "/run/user/1000/notify-relay-laptop-personal.sock",
+      "priority": 2
+    }
   ]
 }
 ```
 
-**Client Example:**
+### Laptop with Outbound Remote
+
+Connects to a server:
+
 ```json
 {
-  "mode": "client",
-  "remote": {
-    "host": "server.example.com:8787",
-    "name": "laptop-work",
-    "token": "secret-token"
+  "server": {
+    "unix": "/run/user/1000/notify-relay.sock"
   },
   "channels": {
     "dbus": { "type": "dbus" },
@@ -158,37 +130,110 @@ Default location: `~/.config/notify-relay.conf`
   "routes": [
     { "condition": "screen_locked", "channel": "phone" },
     { "condition": "always", "channel": "dbus" }
+  ],
+  "remotes": [
+    {
+      "name": "office-server",
+      "type": "outbound",
+      "host": "office.example.com:8787",
+      "token": "secret-token"
+    }
   ]
 }
 ```
 
-### CLI Flags
+### Hub-and-Spoke Setup
+
+Machine that connects to multiple servers AND accepts connections:
+
+```json
+{
+  "server": {
+    "listen": "0.0.0.0:8787",
+    "token": "hub-token"
+  },
+  "remotes": [
+    {
+      "name": "office-server",
+      "type": "outbound",
+      "host": "office.internal:8787",
+      "token": "office-token",
+      "priority": 1
+    },
+    {
+      "name": "home-server",
+      "type": "outbound",
+      "host": "home.local:8787",
+      "token": "home-token",
+      "priority": 2
+    }
+  ],
+  "channels": {
+    "dbus": { "type": "dbus" }
+  },
+  "routes": [
+    { "condition": "remote_unlocked", "channel": "forward" },
+    { "condition": "always", "channel": "dbus" }
+  ]
+}
+```
+
+## Configuration Reference
+
+### Server Settings (`server`)
+
+| Field | Description |
+|-------|-------------|
+| `listen` | TCP address to listen on (e.g., `0.0.0.0:8787`) |
+| `unix` | Unix socket path (e.g., `/run/user/1000/notify-relay.sock`) |
+| `token` | Bearer token for authentication |
+| `token_file` | Path to file containing bearer token |
+
+### Remotes (`remotes[]`)
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique identifier for this remote |
+| `type` | `"inbound"` (accept connections) or `"outbound"` (connect to) |
+| `socket` | For inbound: path to watch for forwarded sockets |
+| `host` | For outbound: server address (e.g., `server:8787`) |
+| `token` | For outbound: authentication token |
+| `priority` | Routing priority (lower = higher priority) |
+
+### Channels (`channels{}`)
+
+| Type | Config |
+|------|--------|
+| `dbus` | None needed |
+| `ntfy` | `{ "server": "https://ntfy.sh", "topic": "my-topic", "token": "..." }` |
+
+### Routes (`routes[]`)
+
+| Condition | Description |
+|-----------|-------------|
+| `always` | Always matches (use as fallback) |
+| `screen_locked` | Matches when local screen is locked |
+| `remote_available` | Matches when any remote is connected |
+| `remote_unlocked` | Matches when any remote has unlocked screen |
+
+## CLI Flags
 
 ```
---mode string          Daemon mode: standalone, server, or client (default: standalone)
 --listen string        TCP listen address (default: "127.0.0.1:8787")
 --unix string          Unix socket path
 --token string         Bearer token for authentication
 --token-file string    File containing bearer token
 --config string        Configuration file (default: ~/.config/notify-relay.conf)
 --ntfy-topic string    ntfy.sh topic (enables phone notifications)
-
-# Client mode only:
---remote-host string   Server address to connect to
---remote-name string   Client hostname (defaults to system hostname)
---remote-token string  Token for server authentication
+--version              Show version
 ```
 
-### Environment Variables
+## Environment Variables
 
 ```
 NOTIFY_RELAY_TOKEN          Server token
-NOTIFY_RELAY_SOCKET         Unix socket path for proxy
-NOTIFY_RELAY_URL            Server URL for proxy
+NOTIFY_RELAY_SOCKET         Unix socket path
 NOTIFY_RELAY_NTFY_TOPIC     Default ntfy topic
-NOTIFY_RELAY_REMOTE_HOST    Default remote host for client mode
-NOTIFY_RELAY_REMOTE_NAME    Default remote name for client mode
-NOTIFY_RELAY_REMOTE_TOKEN   Default remote token for client mode
 ```
 
 ## Usage Examples
@@ -203,116 +248,80 @@ notify-relayd
 notify-send-proxy "Build finished" "Tests passed"
 ```
 
-### Server with Remote Laptop
+### Office Desktop with Laptop
 
-**Server (desktop in office):**
+**Desktop (office):**
 ```bash
-notify-relayd --mode server --listen 0.0.0.0:8787 --token my-secret
+notify-relayd --listen 0.0.0.0:8787 --token my-secret
 ```
 
-**Client (laptop at home):**
+**Laptop (via SSH tunnel):**
 ```bash
-# Via SSH tunnel
-ssh -L 8787:localhost:8787 office-desktop
+ssh -L 8787:localhost:8787 office-desktop &
+notify-relayd --config laptop.json
+```
 
-# Then in another terminal
-notify-relayd --mode client --remote-host localhost:8787 --remote-token my-secret
+Where `laptop.json`:
+```json
+{
+  "server": { "unix": "/run/user/1000/notify-relay.sock" },
+  "remotes": [
+    {
+      "name": "office",
+      "type": "outbound",
+      "host": "localhost:8787",
+      "token": "my-secret"
+    }
+  ]
+}
 ```
 
 **Result:**
 - When laptop is unlocked: notifications appear on laptop
 - When laptop is locked: notifications go to phone via ntfy.sh
 
-### Multiple Laptops
+### SSH RemoteForward Setup
 
-**Server:**
+Forward laptop's socket to the server via SSH:
+
+**Laptop:**
 ```bash
-notify-relayd --mode server --listen 0.0.0.0:8787 --config server.json
+notify-relayd --config laptop.json
 ```
 
-**Work Laptop (Priority 1):**
-```bash
-notify-relayd --mode client --remote-host server:8787 --remote-name laptop-work --config laptop.json
+**Server `.ssh/config`:**
+```
+Host laptop
+  HostName laptop.local
+  RemoteForward /run/user/1000/notify-relay-laptop.sock /run/user/1000/notify-relay.sock
 ```
 
-**Personal Laptop (Priority 2):**
-```bash
-notify-relayd --mode client --remote-host server:8787 --remote-name laptop-personal --config laptop.json
-```
-
-Notifications go to the highest priority unlocked laptop.
-
-## Routing Conditions
-
-Available conditions for routes:
-
-- `always` - Always matches (use as fallback)
-- `screen_locked` - Matches when screen is locked
-- `remote_available` - Matches when any remote client is connected (server only)
-- `remote_unlocked` - Matches when a remote client is unlocked (server only)
-
-Routes are evaluated in order, first match wins.
-
-## Channel Types
-
-### dbus
-
-Desktop notifications via `org.freedesktop.Notifications`.
-
-```json
-{ "type": "dbus" }
-```
-
-### ntfy
-
-Push notifications via ntfy.sh.
-
+**Server config:**
 ```json
 {
-  "type": "ntfy",
-  "config": {
-    "server": "https://ntfy.sh",
-    "topic": "my-topic",
-    "token": "optional-access-token"
-  }
+  "server": { "listen": "0.0.0.0:8787" },
+  "remotes": [
+    {
+      "name": "laptop",
+      "type": "inbound",
+      "socket": "/run/user/1000/notify-relay-laptop.sock",
+      "priority": 1
+    }
+  ]
 }
-```
-
-Urgency levels are automatically mapped to ntfy priorities:
-- `low` → priority 1 (min)
-- `normal` → priority 3 (default)
-- `critical` → priority 5 (max)
-
-## SSH Forwarding
-
-Forward server port through SSH:
-
-```sshconfig
-Host office
-  HostName office.example.com
-  User myuser
-  LocalForward 8787 localhost:8787
-  ExitOnForwardFailure yes
-```
-
-Then run client:
-```bash
-ssh office
-notify-relayd --mode client --remote-host localhost:8787
 ```
 
 ## Protocol
 
-Uses gRPC with the following service methods:
+Uses gRPC bidirectional streaming:
 
+- `Connect` - Bidirectional stream for real-time lock state and notification forwarding
 - `Notify` - Send notification
-- `Connect` - Bidirectional stream for client-server communication
 - `CloseNotification` - Close a notification
 - `GetCapabilities` - Query capabilities
 - `GetServerInfo` - Query server information
-- `Health` - Health check
 
-See `proto/notify_relay/v1/relay.proto` for full protocol definition.
+See `proto/notify_relay/v1/relay.proto` for full definition.
 
 ## Development
 
@@ -320,8 +329,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for:
 - Building from source
 - Running tests
 - Protocol buffer generation
-- Architecture details
 
 ## License
 
-[Your License Here]
+MIT

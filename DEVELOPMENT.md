@@ -30,9 +30,9 @@ go test ./...
 ### Components
 
 1. **notify-relayd** - The main daemon
-   - Standalone mode: Local-only with router
-   - Server mode: Accepts remote client connections
-   - Client mode: Connects to remote server
+   - Unified mode: Can simultaneously accept connections and connect to others
+   - Supports any combination of inbound (accepting) and outbound (connecting) remotes
+   - Routes notifications based on remote lock state and configured rules
 
 2. **notify-send-proxy** - Drop-in notify-send replacement
    - Communicates via gRPC to local daemon
@@ -98,7 +98,7 @@ Note: In CI (`CI=true`), live ntfy tests are skipped.
 ### Enable Verbose Logging
 
 ```bash
-notify-relayd --mode server 2>&1 | tee relay.log
+notify-relayd --listen 0.0.0.0:8787 2>&1 | tee relay.log
 ```
 
 ### gRPC Debugging
@@ -158,18 +158,22 @@ GRPC_GO_LOG_VERBOSITY_LEVEL=99 GRPC_GO_LOG_SEVERITY_LEVEL=info notify-relayd
 - **Performance**: Binary protocol, HTTP/2 multiplexing
 - **Tooling**: Excellent debugging and load balancing support
 
-### Why Three Modes?
+### Why Unified Architecture?
 
-- **Standalone**: Simple local use, no complexity
-- **Server**: Central point for routing decisions
-- **Client**: Edge nodes that report state and receive notifications
+Instead of separate client/server modes, notify-relay uses a unified architecture where:
+
+- **Each daemon can be both client and server**: Accept connections from some machines while connecting to others
+- **Configuration-driven behavior**: What the daemon does depends on what's configured, not an explicit mode
+- **Flexible topologies**: Hub-and-spoke, mesh, or simple point-to-point all work naturally
+- **Simpler mental model**: Configure remotes, and the daemon handles the rest
 
 ### Connection Model
 
-- Client initiates connection to server (outbound, works through NAT)
-- Persistent gRPC stream with automatic reconnect
-- Lock state changes pushed in real-time
-- Server makes routing decisions based on all connected clients
+- **Inbound remotes**: Accept connections from other machines (gRPC server)
+- **Outbound remotes**: Connect to other machines (gRPC client, works through NAT)
+- **Bidirectional streams**: Real-time lock state updates and notification forwarding
+- **Auto-reconnect**: Outbound connections automatically reconnect on failure
+- **Unified routing**: Makes decisions based on all connected remotes regardless of direction
 
 ## Troubleshooting
 
@@ -184,25 +188,26 @@ lsof -i :8787
 
 ### Authentication Failed
 
-Verify token:
+Verify tokens match on both sides:
 ```bash
-# On server
-notify-relayd --token correct-token
+# Machine accepting connections (with server.listen configured)
+notify-relayd --listen 0.0.0.0:8787 --token correct-token
 
-# On client
-notify-relayd --remote-host server:8787 --remote-token correct-token
+# Machine connecting to it (outbound remote)
+# In config: remotes[0].token = "correct-token"
+notify-relayd --config client.json
 ```
 
 ### No Remote Forwarding
 
-Check client connection:
+Check outbound remote connection:
 ```bash
-# Server should show:
-# "Remote client connected: laptop-work (locked: false)"
+# Daemon should show:
+# "Connected to remote office-server at server:8787"
 
 # If not, check:
-# 1. Client is running
+# 1. Daemon is configured with outbound remote
 # 2. Network connectivity
 # 3. Token is correct
-# 4. Server is in --mode server
+# 4. Remote host is reachable
 ```
