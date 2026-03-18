@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"time"
 
 	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
@@ -64,7 +64,7 @@ func (s *Server) HandleConnect(stream notify_relayv1.RelayService_ConnectServer)
 	}
 	defer s.manager.RemoveRemote(hostname)
 
-	log.Printf("Remote inbound connected: %s (locked: %v)", hostname, remote.IsLocked)
+	slog.Info("remote inbound connected", "hostname", hostname, "locked", remote.IsLocked)
 
 	// Start goroutine to send periodic pings
 	pingDone := make(chan struct{})
@@ -82,7 +82,7 @@ func (s *Server) HandleConnect(stream notify_relayv1.RelayService_ConnectServer)
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			close(pingDone)
-			log.Printf("Remote client disconnected: %s", hostname)
+			slog.Info("remote client disconnected", "hostname", hostname)
 			return nil
 		}
 		if err != nil {
@@ -101,7 +101,7 @@ func (s *Server) HandleConnect(stream notify_relayv1.RelayService_ConnectServer)
 
 		// Handle message
 		if err := s.handleClientMessage(hostname, msg, remote); err != nil {
-			log.Printf("Error handling message from %s: %v", hostname, err)
+			slog.Error("error handling message", "hostname", hostname, "error", err)
 		}
 	}
 }
@@ -110,7 +110,7 @@ func (s *Server) handleClientMessage(hostname string, msg *notify_relayv1.Client
 	switch m := msg.Message.(type) {
 	case *notify_relayv1.ClientMessage_LockState:
 		s.manager.UpdateLockState(hostname, m.LockState.IsLocked)
-		log.Printf("Lock state update from %s: locked=%v", hostname, m.LockState.IsLocked)
+		slog.Debug("lock state update", "hostname", hostname, "locked", m.LockState.IsLocked)
 
 	case *notify_relayv1.ClientMessage_Ping:
 		// Just updating last seen is enough, pong sent by sendPings goroutine
@@ -169,7 +169,7 @@ func (s *Server) StartCleanup(ctx context.Context) {
 			case <-ticker.C:
 				removed := s.manager.CleanupDisconnected(s.timeout)
 				for _, hostname := range removed {
-					log.Printf("Cleaned up disconnected client: %s", hostname)
+					slog.Info("cleaned up disconnected client", "hostname", hostname)
 				}
 			}
 		}

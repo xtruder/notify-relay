@@ -2,7 +2,7 @@ package remotes
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +81,7 @@ func (ow *OutboundWatcher) tryConnect(socketPath string) {
 		// Socket doesn't exist
 		if remote, exists := ow.manager.GetRemote(socketPath); exists {
 			// Remote exists but socket gone, remove it
-			log.Printf("Socket %s removed, disconnecting remote", socketPath)
+			slog.Info("socket removed, disconnecting remote", "socket", socketPath)
 			ow.manager.RemoveRemote(remote.Hostname)
 			if ow.onDisconnect != nil {
 				ow.onDisconnect()
@@ -98,7 +98,7 @@ func (ow *OutboundWatcher) tryConnect(socketPath string) {
 	}
 
 	// Try to connect
-	log.Printf("Found socket %s, connecting...", socketPath)
+	slog.Info("found socket, connecting", "socket", socketPath)
 
 	client := NewClient(ClientConfig{
 		ServerAddr: socketPath,
@@ -107,13 +107,13 @@ func (ow *OutboundWatcher) tryConnect(socketPath string) {
 
 	client.SetCallbacks(
 		func() {
-			log.Printf("Connected to remote %s via %s", hostname, socketPath)
+			slog.Info("connected to remote", "hostname", hostname, "socket", socketPath)
 			if ow.onConnect != nil {
 				ow.onConnect()
 			}
 		},
 		func() {
-			log.Printf("Disconnected from remote %s", hostname)
+			slog.Info("disconnected from remote", "hostname", hostname)
 			ow.manager.RemoveRemote(hostname)
 			if ow.onDisconnect != nil {
 				ow.onDisconnect()
@@ -121,14 +121,14 @@ func (ow *OutboundWatcher) tryConnect(socketPath string) {
 		},
 		func(notif *notify_relayv1.ForwardedNotification) {
 			// Handle forwarded notification
-			log.Printf("Received notification from %s: %s", notif.SourceHostname, notif.Notification.Summary)
+			slog.Info("received forwarded notification", "from", notif.SourceHostname, "summary", notif.Notification.Summary)
 		},
 	)
 
 	// Connect in background
 	go func() {
 		if err := client.Connect(ow.ctx); err != nil {
-			log.Printf("Failed to connect to %s: %v", socketPath, err)
+			slog.Error("failed to connect", "socket", socketPath, "error", err)
 		}
 	}()
 }

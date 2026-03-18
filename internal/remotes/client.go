@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -90,7 +90,7 @@ func (c *Client) Connect(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		log.Printf("Connection to server failed: %v, reconnecting in %v...", err, c.reconnectInterval)
+		slog.Info("connection to server failed, reconnecting", "error", err, "delay", c.reconnectInterval)
 
 		// Exponential backoff
 		select {
@@ -174,7 +174,7 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		onConnect()
 	}
 
-	log.Printf("Connected to server: %s", c.serverAddr)
+	slog.Info("connected to server", "address", c.serverAddr)
 	return nil
 }
 
@@ -204,7 +204,7 @@ func (c *Client) handleStream(ctx context.Context) error {
 
 		// Handle message
 		if err := c.handleServerMessage(msg); err != nil {
-			log.Printf("Error handling server message: %v", err)
+			slog.Error("error handling server message", "error", err)
 		}
 	}
 }
@@ -236,13 +236,13 @@ func (c *Client) handleServerMessage(msg *notify_relayv1.ServerMessage) error {
 				},
 			}
 			if err := stream.Send(resp); err != nil {
-				log.Printf("Failed to send notification ack: %v", err)
+				slog.Error("failed to send notification ack", "error", err)
 			}
 		}
 
 	case *notify_relayv1.ServerMessage_ClientList:
 		// Client list update, can be used for UI/debugging
-		log.Printf("Connected clients: %d", len(m.ClientList.Clients))
+		slog.Debug("connected clients", "count", len(m.ClientList.Clients))
 
 	default:
 		return fmt.Errorf("unknown message type from server")
@@ -278,9 +278,9 @@ func (c *Client) watchLockState(done chan struct{}) {
 		}
 
 		if err := stream.Send(msg); err != nil {
-			log.Printf("Failed to send lock state update: %v", err)
+			slog.Error("failed to send lock state update", "error", err)
 		} else {
-			log.Printf("Sent lock state update: locked=%v", locked)
+			slog.Debug("sent lock state update", "locked", locked)
 		}
 	})
 
@@ -309,7 +309,7 @@ func (c *Client) setDisconnected() {
 	}
 	c.mu.Lock()
 
-	log.Printf("Disconnected from server: %s", c.serverAddr)
+	slog.Info("disconnected from server", "address", c.serverAddr)
 }
 
 // Close closes the client connection

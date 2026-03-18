@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -80,9 +80,9 @@ func (s *GRPCServer) SetRemoteManager(m *remotes.Manager) {
 
 // Serve starts the gRPC server
 func (s *GRPCServer) Serve() error {
-	log.Printf("notify-relayd gRPC listening on %s", s.listener.Addr())
+	slog.Info("notify-relayd gRPC listening", "address", s.listener.Addr())
 	if s.config.Token != "" {
-		log.Printf("notify-relayd bearer token: %s", s.config.Token)
+		slog.Info("notify-relayd bearer token configured")
 	}
 	return s.grpcServer.Serve(s.listener)
 }
@@ -102,7 +102,7 @@ func (s *GRPCServer) Shutdown(ctx context.Context) error {
 	// Clean up Unix socket file if applicable
 	if s.config.Unix != "" {
 		if err := os.Remove(s.config.Unix); err != nil && !os.IsNotExist(err) {
-			log.Printf("Warning: failed to remove socket file: %v", err)
+			slog.Warn("failed to remove socket file", "error", err)
 		}
 	}
 

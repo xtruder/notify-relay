@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -67,9 +67,9 @@ func New(cfg Config, r *router.Router) (*Server, error) {
 }
 
 func (s *Server) Serve() error {
-	log.Printf("notify-relayd listening on %s", s.ln.Addr())
+	slog.Info("notify-relayd listening", "address", s.ln.Addr())
 	if s.cfg.Token != "" {
-		log.Printf("notify-relayd bearer token: %s", s.cfg.Token)
+		slog.Info("notify-relayd bearer token configured")
 	}
 	err := s.http.Serve(s.ln)
 	if errors.Is(err, http.ErrServerClosed) {
@@ -186,6 +186,6 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("write response: %v", err)
+		slog.Error("write response failed", "error", err)
 	}
 }

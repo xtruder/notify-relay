@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -92,11 +92,12 @@ func main() {
 	if configFile != "" {
 		if err := loadConfig(configFile, &cfg); err != nil {
 			if !os.IsNotExist(err) {
-				log.Fatalf("load config: %v", err)
+				slog.Error("load config failed", "error", err)
+				os.Exit(1)
 			}
 			// Config file doesn't exist, that's ok - we'll use defaults
 		} else {
-			log.Printf("Loaded config from %s", configFile)
+			slog.Info("loaded config", "file", configFile)
 		}
 	}
 
@@ -105,25 +106,27 @@ func main() {
 }
 
 func run(cfg Config, ntfyTopic string) {
-	log.Printf("Starting notify-relayd (unified mode)")
+	slog.Info("starting notify-relayd", "mode", "unified")
 
 	// Prepare token
 	generatedToken, err := prepareToken(&cfg.Server)
 	if err != nil {
-		log.Fatalf("prepare token: %v", err)
+		slog.Error("prepare token failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize lock detector
 	lockDetector, err := lock.New()
 	if err != nil {
-		log.Printf("warning: could not initialize lock detector: %v", err)
+		slog.Warn("could not initialize lock detector", "error", err)
 		lockDetector = nil
 	}
 
 	// Create channels
 	channels, err := createChannels(cfg.Channels, ntfyTopic)
 	if err != nil {
-		log.Fatalf("init channels: %v", err)
+		slog.Error("init channels failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Build router configuration
@@ -168,11 +171,11 @@ func run(cfg Config, ntfyTopic string) {
 		outboundWatcher := remotes.NewOutboundWatcher(manager, inboundSockets, "", "server")
 		go func() {
 			if err := outboundWatcher.Start(context.Background()); err != nil {
-				log.Printf("Outbound watcher error: %v", err)
+				slog.Error("outbound watcher error", "error", err)
 			}
 		}()
 		defer outboundWatcher.Stop()
-		log.Printf("Watching for inbound sockets: %v", inboundSockets)
+		slog.Info("watching for inbound sockets", "sockets", inboundSockets)
 	}
 
 	// Start outbound remote connections
@@ -187,7 +190,8 @@ func run(cfg Config, ntfyTopic string) {
 	// Create router with remote forwarding support
 	r, err := router.NewWithRemotes(routerCfg, lockDetector, channels, manager)
 	if err != nil {
-		log.Fatalf("init router: %v", err)
+		slog.Error("init router failed", "error", err)
+		os.Exit(1)
 	}
 	defer r.Close()
 
@@ -201,13 +205,14 @@ func run(cfg Config, ntfyTopic string) {
 		}
 		grpcServer, err = server.NewGRPCServer(srvConfig, r)
 		if err != nil {
-			log.Fatalf("init grpc server: %v", err)
+			slog.Error("init grpc server failed", "error", err)
+			os.Exit(1)
 		}
 		grpcServer.SetRemoteManager(manager)
 		if generatedToken {
-			log.Printf("notify-relayd auto-generated bearer token")
+			slog.Info("notify-relayd auto-generated bearer token")
 		}
-		log.Printf("gRPC server listening on %s", cfg.Server.Listen)
+		slog.Info("gRPC server listening", "address", cfg.Server.Listen)
 	}
 
 	// Start cleanup goroutine
@@ -221,7 +226,7 @@ func run(cfg Config, ntfyTopic string) {
 	if grpcServer != nil {
 		go func() {
 			if err := grpcServer.Serve(); err != nil {
-				log.Printf("grpc server error: %v", err)
+				slog.Error("grpc server error", "error", err)
 			}
 		}()
 	}
@@ -230,21 +235,21 @@ func run(cfg Config, ntfyTopic string) {
 	for _, client := range outboundClients {
 		go func(c *remotes.Client) {
 			if err := c.Connect(ctx); err != nil {
-				log.Printf("Remote connection error: %v", err)
+				slog.Error("remote connection error", "error", err)
 			}
 		}(client)
 	}
 
 	// Wait for shutdown signal
 	<-ctx.Done()
-	log.Printf("Shutting down...")
+	slog.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if grpcServer != nil {
 		if err := grpcServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown server: %v", err)
+			slog.Error("shutdown server error", "error", err)
 		}
 	}
 
@@ -267,10 +272,10 @@ func startOutboundRemote(remote RemoteEndpoint, lockDetector *lock.Detector) *re
 	})
 
 	remoteClient.SetCallbacks(
-		func() { log.Printf("Connected to remote %s at %s", remote.Name, remote.Host) },
-		func() { log.Printf("Disconnected from remote %s at %s", remote.Name, remote.Host) },
+		func() { slog.Info("connected to remote", "name", remote.Name, "host", remote.Host) },
+		func() { slog.Info("disconnected from remote", "name", remote.Name, "host", remote.Host) },
 		func(notif *notify_relayv1.ForwardedNotification) {
-			log.Printf("Received forwarded notification from %s: %s", remote.Name, notif.Notification.Summary)
+			slog.Info("received forwarded notification", "from", remote.Name, "summary", notif.Notification.Summary)
 		},
 	)
 
