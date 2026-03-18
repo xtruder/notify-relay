@@ -20,6 +20,8 @@ import (
 	"github.com/xtruder/notify-relay/internal/dbus"
 	"github.com/xtruder/notify-relay/internal/lock"
 	"github.com/xtruder/notify-relay/internal/ntfy"
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
+	"github.com/xtruder/notify-relay/internal/remotes"
 	"github.com/xtruder/notify-relay/internal/router"
 	"github.com/xtruder/notify-relay/internal/server"
 )
@@ -36,31 +38,54 @@ type RouteConfig struct {
 	Channel   string `json:"channel"`
 }
 
+// RemoteConfig holds configuration for remote connections
+type RemoteConfig struct {
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Token    string `json:"token"`
+	Priority int    `json:"priority"`
+}
+
 // Config holds the full application configuration
 type Config struct {
+	Mode     string                   `json:"mode"`
 	Server   server.Config            `json:"server"`
+	Remote   RemoteConfig             `json:"remote"`
 	Channels map[string]ChannelConfig `json:"channels"`
 	Routes   []RouteConfig            `json:"routes"`
+	Remotes  []RemoteConfig           `json:"remotes"` // for server: known remotes with priorities
 }
 
 func main() {
 	var cfg Config
 	var configFile string
 	var ntfyTopic string
+	var remoteHost string
+	var remoteName string
+	var remoteToken string
 	var showVersion bool
 
+	flag.StringVar(&cfg.Mode, "mode", "standalone", "Daemon mode: standalone, server, or client")
 	flag.StringVar(&cfg.Server.Listen, "listen", "127.0.0.1:8787", "TCP listen address")
 	flag.StringVar(&cfg.Server.Unix, "unix", "", "Unix socket path instead of TCP")
 	flag.StringVar(&cfg.Server.Token, "token", os.Getenv("NOTIFY_RELAY_TOKEN"), "Bearer token for API authentication")
 	flag.StringVar(&cfg.Server.TokenFile, "token-file", "", "File containing bearer token")
 	flag.StringVar(&configFile, "config", "", "Configuration file (JSON). Default: ~/.config/notify-relay.conf")
 	flag.StringVar(&ntfyTopic, "ntfy-topic", os.Getenv("NOTIFY_RELAY_NTFY_TOPIC"), "ntfy.sh topic for phone notifications when screen is locked")
+	flag.StringVar(&remoteHost, "remote-host", os.Getenv("NOTIFY_RELAY_REMOTE_HOST"), "Server address for client mode")
+	flag.StringVar(&remoteName, "remote-name", os.Getenv("NOTIFY_RELAY_REMOTE_NAME"), "Client hostname (defaults to system hostname)")
+	flag.StringVar(&remoteToken, "remote-token", os.Getenv("NOTIFY_RELAY_REMOTE_TOKEN"), "Token for client mode authentication")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.Parse()
 
 	if showVersion {
 		fmt.Println(buildinfo.String("notify-relayd"))
 		return
+	}
+
+	// Set default hostname if not provided
+	if remoteName == "" {
+		remoteName, _ = os.Hostname()
 	}
 
 	// Load config file: explicit flag takes precedence over default path
@@ -79,6 +104,217 @@ func main() {
 		}
 	}
 
+	// Override config with CLI flags
+	if ntfyTopic != "" {
+		cfg.Mode = "standalone"
+	}
+	if remoteHost != "" {
+		cfg.Mode = "client"
+		cfg.Remote.Host = remoteHost
+		cfg.Remote.Name = remoteName
+		cfg.Remote.Token = remoteToken
+	}
+
+	// Initialize based on mode
+	switch cfg.Mode {
+	case "server":
+		runServerMode(cfg)
+	case "client":
+		runClientMode(cfg)
+	default: // standalone
+		runStandaloneMode(cfg, ntfyTopic)
+	}
+}
+
+func runServerMode(cfg Config) {
+	log.Printf("Running in SERVER mode on %s", cfg.Server.Listen)
+
+	// Prepare token
+	generatedToken, err := prepareToken(&cfg.Server)
+	if err != nil {
+		log.Fatalf("prepare token: %v", err)
+	}
+
+	// Initialize lock detector
+	lockDetector, err := lock.New()
+	if err != nil {
+		log.Printf("warning: could not initialize lock detector: %v", err)
+		lockDetector = nil
+	}
+
+	// Create channels
+	channels, err := createChannels(cfg.Channels)
+	if err != nil {
+		log.Fatalf("init channels: %v", err)
+	}
+
+	// Build router configuration
+	routerCfg := router.Config{
+		Routes: make([]router.Route, len(cfg.Routes)),
+	}
+	for i, r := range cfg.Routes {
+		routerCfg.Routes[i] = router.Route{
+			Condition: r.Condition,
+			Channel:   r.Channel,
+		}
+	}
+
+	// Default routes if none specified
+	if len(routerCfg.Routes) == 0 {
+		routerCfg.Routes = []router.Route{
+			{Condition: "remote_unlocked", Channel: "forward"},
+			{Condition: "screen_locked", Channel: "phone"},
+			{Condition: "always", Channel: "dbus"},
+		}
+	}
+
+	// Create remote manager
+	manager := remotes.NewManager()
+
+	// Create router with remote forwarding support
+	r, err := router.NewWithRemotes(routerCfg, lockDetector, channels, manager)
+	if err != nil {
+		log.Fatalf("init router: %v", err)
+	}
+	defer r.Close()
+
+	// Create gRPC server
+	grpcServer, err := server.NewGRPCServer(cfg.Server, r)
+	if err != nil {
+		log.Fatalf("init grpc server: %v", err)
+	}
+	grpcServer.SetRemoteManager(manager)
+
+	if generatedToken {
+		log.Printf("notify-relayd auto-generated bearer token")
+	}
+
+	// Start cleanup goroutine
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	remoteServer := remotes.NewServer(manager)
+	remoteServer.StartCleanup(ctx)
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := grpcServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown server: %v", err)
+		}
+		if lockDetector != nil {
+			lockDetector.Close()
+		}
+	}()
+
+	if err := grpcServer.Serve(); err != nil {
+		log.Fatalf("serve: %v", err)
+	}
+}
+
+func runClientMode(cfg Config) {
+	log.Printf("Running in CLIENT mode connecting to %s as %s", cfg.Remote.Host, cfg.Remote.Name)
+
+	// Initialize lock detector
+	lockDetector, err := lock.New()
+	if err != nil {
+		log.Fatalf("could not initialize lock detector: %v", err)
+	}
+	defer lockDetector.Close()
+
+	// Create channels
+	channels, err := createChannels(cfg.Channels)
+	if err != nil {
+		log.Fatalf("init channels: %v", err)
+	}
+
+	// Build router configuration
+	routerCfg := router.Config{
+		Routes: make([]router.Route, len(cfg.Routes)),
+	}
+	for i, r := range cfg.Routes {
+		routerCfg.Routes[i] = router.Route{
+			Condition: r.Condition,
+			Channel:   r.Channel,
+		}
+	}
+
+	// Default routes if none specified
+	if len(routerCfg.Routes) == 0 {
+		routerCfg.Routes = []router.Route{
+			{Condition: "screen_locked", Channel: "phone"},
+			{Condition: "always", Channel: "dbus"},
+		}
+	}
+
+	// Create local router (for handling forwarded notifications)
+	r, err := router.New(routerCfg, lockDetector, channels)
+	if err != nil {
+		log.Fatalf("init router: %v", err)
+	}
+	defer r.Close()
+
+	// Create local gRPC server (for local proxy)
+	localServer, err := server.NewGRPCServer(server.Config{
+		Unix: "/run/user/" + fmt.Sprintf("%d", os.Getuid()) + "/notify-relay.sock",
+	}, r)
+	if err != nil {
+		log.Fatalf("init local server: %v", err)
+	}
+
+	// Create remote client
+	remoteCfg := remotes.ClientConfig{
+		ServerAddr: cfg.Remote.Host,
+		Hostname:   cfg.Remote.Name,
+		Token:      cfg.Remote.Token,
+		LockState:  lockDetector,
+	}
+	remoteClient := remotes.NewClient(remoteCfg)
+
+	// Setup notification handler
+	remoteClient.SetCallbacks(
+		func() { log.Printf("Connected to server %s", cfg.Remote.Host) },
+		func() { log.Printf("Disconnected from server %s", cfg.Remote.Host) },
+		func(notif *notify_relayv1.ForwardedNotification) {
+			// Handle forwarded notification from server
+			log.Printf("Received forwarded notification from %s: %s", notif.SourceHostname, notif.Notification.Summary)
+			// Route locally
+			// Implementation: convert proto to protocol and call r.Notify()
+		},
+	)
+
+	// Start everything
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := localServer.Serve(); err != nil {
+			log.Printf("local server error: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := remoteClient.Connect(ctx); err != nil {
+			log.Printf("remote client error: %v", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		localServer.Shutdown(shutdownCtx)
+		remoteClient.Close()
+	}()
+
+	// Wait for shutdown
+	<-ctx.Done()
+}
+
+func runStandaloneMode(cfg Config, ntfyTopic string) {
+	log.Printf("Running in STANDALONE mode")
+
 	generatedToken, err := prepareToken(&cfg.Server)
 	if err != nil {
 		log.Fatalf("prepare token: %v", err)
@@ -95,20 +331,7 @@ func main() {
 	var routerCfg router.Config
 	var channels []channel.Channel
 
-	if configFile != "" {
-		// Config file provided: use routes and channels from config
-		routerCfg.Routes = make([]router.Route, len(cfg.Routes))
-		for i, r := range cfg.Routes {
-			routerCfg.Routes[i] = router.Route{
-				Condition: r.Condition,
-				Channel:   r.Channel,
-			}
-		}
-		channels, err = createChannels(cfg.Channels)
-		if err != nil {
-			log.Fatalf("init channels: %v", err)
-		}
-	} else if ntfyTopic != "" {
+	if ntfyTopic != "" {
 		// CLI ntfy topic provided: route screen_locked -> ntfy, always -> dbus
 		routerCfg.Routes = []router.Route{
 			{Condition: "screen_locked", Channel: "ntfy"},
@@ -121,11 +344,23 @@ func main() {
 		log.Printf("Configured ntfy.sh topic: %s", ntfyTopic)
 		log.Printf("Routing: screen_locked -> ntfy, unlocked -> dbus")
 	} else {
-		// Default: dbus only
-		routerCfg.Routes = []router.Route{
-			{Condition: "always", Channel: "dbus"},
+		// Use config or default
+		routerCfg.Routes = make([]router.Route, len(cfg.Routes))
+		for i, r := range cfg.Routes {
+			routerCfg.Routes[i] = router.Route{
+				Condition: r.Condition,
+				Channel:   r.Channel,
+			}
 		}
-		channels, err = createChannels(nil)
+
+		// If no routes specified, use default: always -> dbus
+		if len(routerCfg.Routes) == 0 {
+			routerCfg.Routes = []router.Route{
+				{Condition: "always", Channel: "dbus"},
+			}
+		}
+
+		channels, err = createChannels(cfg.Channels)
 		if err != nil {
 			log.Fatalf("init channels: %v", err)
 		}
@@ -137,10 +372,10 @@ func main() {
 		log.Fatalf("init router: %v", err)
 	}
 
-	// Create server
-	srv, err := server.New(cfg.Server, r)
+	// Create gRPC server
+	srv, err := server.NewGRPCServer(cfg.Server, r)
 	if err != nil {
-		log.Fatalf("init http server: %v", err)
+		log.Fatalf("init grpc server: %v", err)
 	}
 	if generatedToken {
 		log.Printf("notify-relayd auto-generated bearer token")
@@ -172,7 +407,7 @@ func main() {
 func loadConfig(path string, cfg *Config) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read config file: %w", err)
+		return err
 	}
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("parse config file: %w", err)

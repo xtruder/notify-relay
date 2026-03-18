@@ -1,229 +1,208 @@
-# Development
+# Development Guide
 
-## Local build
+## Building
 
-Build both binaries:
+### Requirements
+
+- Go 1.21 or later
+- buf CLI (for protocol buffer generation)
+- Protocol buffer plugins:
+  ```bash
+  go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+  go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+  ```
+
+### Build All Binaries
 
 ```bash
 go build ./cmd/notify-relayd
 go build ./cmd/notify-send-proxy
 ```
 
-Build everything and catch package-level compile errors:
-
-```bash
-go build ./...
-```
-
-Version metadata is injected by release builds. Local builds report `dev`.
-
-## Common checks
-
-Run the checks used during development:
-
-```bash
-gofmt -w .
-go build ./...
-bash -n scripts/install.sh
-ruby -c Formula/notify-relay.rb
-```
-
-Run tests:
+### Run Tests
 
 ```bash
 go test ./...
 ```
 
-## Project layout
+## Architecture
 
-- `cmd/notify-relayd`: host relay entrypoint supporting multiple notification channels
-- `cmd/notify-send-proxy`: `notify-send` compatible client
-- `internal/channel`: channel interface definitions
-- `internal/dbus`: dbus notification channel implementation
-- `internal/ntfy`: ntfy.sh HTTP notification channel
-- `internal/router`: notification routing logic with condition evaluation
-- `internal/lock`: screen lock state detector via dbus
-- `internal/condition`: routing conditions (always, screen_locked)
-- `internal/server`: HTTP and Unix socket server
-- `internal/protocol`: shared request and response types
-- `internal/tests`: integration and scenario tests
-- `packaging/systemd`: user service unit
-- `packaging/homebrew`: tap formula template
-- `scripts/install.sh`: GitHub release installer
+### Components
 
-## Running locally
+1. **notify-relayd** - The main daemon
+   - Standalone mode: Local-only with router
+   - Server mode: Accepts remote client connections
+   - Client mode: Connects to remote server
 
-### Basic (dbus only)
+2. **notify-send-proxy** - Drop-in notify-send replacement
+   - Communicates via gRPC to local daemon
+   - Same CLI interface as notify-send
 
-Run the relay against the default Unix socket path:
+3. **Protocol Buffer Definitions**
+   - `proto/notify_relay/v1/relay.proto` - Service definition
+   - Generated code in `internal/proto/`
 
-```bash
-go run ./cmd/notify-relayd --unix /run/user/$(id -u)/notify-relay.sock
+### Package Structure
+
+```
+internal/
+├── channel/       # Channel interface
+├── dbus/          # D-Bus desktop notifications
+├── ntfy/          # ntfy.sh HTTP notifications
+├── router/        # Notification routing with conditions
+├── remotes/       # Remote client management (gRPC)
+│   ├── manager.go # Client tracking and routing
+│   ├── server.go  # Server-side stream handling
+│   └── client.go  # Client-side connection with reconnect
+├── server/        # gRPC server implementation
+├── lock/          # Screen lock detection
+├── condition/     # Routing conditions
+└── proto/         # Generated protobuf code
 ```
 
-Run the proxy against that socket:
+## Protocol Buffers
+
+### Regenerate Code
 
 ```bash
-NOTIFY_RELAY_SOCKET=/run/user/$(id -u)/notify-relay.sock \
-  go run ./cmd/notify-send-proxy -- "Local test" "Hello from notify-relay"
+buf generate
 ```
 
-### With ntfy.sh phone notifications
+This generates Go code from `proto/notify_relay/v1/relay.proto`.
 
-Run with automatic phone notifications when screen is locked:
+### Adding New Fields
 
-```bash
-go run ./cmd/notify-relayd --ntfy-topic my-test-topic
-```
-
-Or with a config file:
-
-```bash
-go run ./cmd/notify-relayd --config ~/.config/notify-relay.conf
-```
-
-Test TCP mode instead:
-
-```bash
-go run ./cmd/notify-relayd --listen 127.0.0.1:8787 --token-file ~/.config/notify-relay/token
-NOTIFY_RELAY_URL=http://127.0.0.1:8787 \
-NOTIFY_RELAY_TOKEN="$(cat ~/.config/notify-relay/token)" \
-  go run ./cmd/notify-send-proxy -- "TCP test" "Hello from notify-relay"
-```
+1. Edit `proto/notify_relay/v1/relay.proto`
+2. Run `buf generate`
+3. Commit generated files
 
 ## Testing
 
-### Unit tests
-
-Mock-based tests that don't require external services:
+### Unit Tests
 
 ```bash
-go test ./internal/tests/... -v -run "TestRouter|TestCondition"
+go test ./internal/tests/... -v
 ```
 
-### Integration tests
-
-Tests that send actual notifications to ntfy.sh:
+### Integration Tests (Live ntfy.sh)
 
 ```bash
-# Set your test topic via environment
 export TEST_NTFY_TOPIC=my-test-topic
-go test ./internal/tests/... -v -run "TestNtfy"
+go test ./internal/tests/... -v -run TestNtfy
 ```
 
-Note: In CI environments (`CI=true`), live ntfy tests are automatically skipped.
+Note: In CI (`CI=true`), live ntfy tests are skipped.
 
-### Testing the installer
+## Debugging
 
-Test the local script syntax:
+### Enable Verbose Logging
 
 ```bash
-bash -n scripts/install.sh
+notify-relayd --mode server 2>&1 | tee relay.log
 ```
 
-Test the installer logic against a published release in a temporary directory:
+### gRPC Debugging
 
 ```bash
-tmpbin="$(mktemp -d)/bin"
-tmpsystemd="$(mktemp -d)/systemd"
-bash scripts/install.sh --version v0.1.3 --install-dir "$tmpbin" --systemd-dir "$tmpsystemd"
+GRPC_GO_LOG_VERBOSITY_LEVEL=99 GRPC_GO_LOG_SEVERITY_LEVEL=info notify-relayd
 ```
 
-Trace the installer when debugging shell behavior:
+## Common Tasks
 
+### Adding a New Routing Condition
+
+1. Define condition in `internal/condition/`:
+   ```go
+   type MyCondition struct{}
+   
+   func (m MyCondition) Name() string { return "my_condition" }
+   func (m MyCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+       // Your logic here
+       return true
+   }
+   ```
+
+2. Register in router:
+   ```go
+   r.conditions["my_condition"] = condition.MyCondition{}
+   ```
+
+3. Use in config:
+   ```json
+   { "condition": "my_condition", "channel": "dbus" }
+   ```
+
+### Adding a New Channel Type
+
+1. Implement `channel.Channel` interface
+2. Add to `createChannels()` in main.go
+3. Update documentation
+
+## Release Process
+
+1. Update version in `internal/buildinfo/buildinfo.go`
+2. Update CHANGELOG.md
+3. Tag release:
+   ```bash
+   git tag v0.3.0
+   git push origin v0.3.0
+   ```
+4. GitHub Actions builds and releases automatically
+
+## Architecture Decisions
+
+### Why gRPC?
+
+- **Streaming**: Bidirectional streams for real-time lock state updates
+- **Type Safety**: Generated code prevents API mismatches
+- **Performance**: Binary protocol, HTTP/2 multiplexing
+- **Tooling**: Excellent debugging and load balancing support
+
+### Why Three Modes?
+
+- **Standalone**: Simple local use, no complexity
+- **Server**: Central point for routing decisions
+- **Client**: Edge nodes that report state and receive notifications
+
+### Connection Model
+
+- Client initiates connection to server (outbound, works through NAT)
+- Persistent gRPC stream with automatic reconnect
+- Lock state changes pushed in real-time
+- Server makes routing decisions based on all connected clients
+
+## Troubleshooting
+
+### Connection Refused
+
+Check if daemon is running:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xtruder/notify-relay/main/scripts/install.sh | bash -x
+systemctl --user status notify-relayd
+# or
+lsof -i :8787
 ```
 
-If GitHub raw caching is suspicious, test the script by commit SHA instead of `main`.
+### Authentication Failed
 
-## Testing the Homebrew formula
-
-Quick syntax check:
-
+Verify token:
 ```bash
-ruby -c Formula/notify-relay.rb
+# On server
+notify-relayd --token correct-token
+
+# On client
+notify-relayd --remote-host server:8787 --remote-token correct-token
 ```
 
-Install from the local formula while iterating:
+### No Remote Forwarding
 
+Check client connection:
 ```bash
-brew install --HEAD ./Formula/notify-relay.rb
+# Server should show:
+# "Remote client connected: laptop-work (locked: false)"
+
+# If not, check:
+# 1. Client is running
+# 2. Network connectivity
+# 3. Token is correct
+# 4. Server is in --mode server
 ```
-
-Or mimic the CI tap flow locally:
-
-```bash
-brew tap-new xtruder/tap
-cp Formula/notify-relay.rb "$(brew --repo xtruder/tap)/Formula/notify-relay.rb"
-brew install --build-from-source --HEAD xtruder/tap/notify-relay
-```
-
-## Testing systemd integration
-
-Install the packaged user unit:
-
-```bash
-install -Dm644 packaging/systemd/notify-relayd.service ~/.config/systemd/user/notify-relayd.service
-systemctl --user daemon-reload
-systemctl --user enable --now notify-relayd.service
-```
-
-Check status and recent logs:
-
-```bash
-systemctl --user status notify-relayd.service
-journalctl --user -u notify-relayd.service -n 50
-```
-
-## Release flow
-
-Typical sequence:
-
-```bash
-git push origin main
-```
-
-Wait for `CI` and `Brew` on `main` to pass, then:
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-The release workflow then:
-
-- builds Linux and macOS tarballs
-- publishes the GitHub release
-- updates `xtruder/homebrew-tap`
-
-## GitHub Actions
-
-- `CI`: formatting, build checks, and tests
-- `Brew`: validates the formula on Linux and macOS
-- `Release`: builds tarballs, publishes GitHub releases, and syncs `xtruder/homebrew-tap`
-
-## Architecture
-
-### Multi-Channel Support
-
-The relay now supports multiple notification channels:
-
-1. **dbus** - Desktop notifications (original behavior)
-2. **ntfy** - HTTP-based push notifications to phones
-
-### Routing
-
-Notifications are routed based on configurable conditions:
-
-- `always` - Always matches (fallback)
-- `screen_locked` - Matches when screen is locked (via org.freedesktop.ScreenSaver)
-
-Routes are evaluated in order, first match wins.
-
-### Configuration Priority
-
-1. `--config <path>` flag (explicit)
-2. `~/.config/notify-relay.conf` (default)
-3. `--ntfy-topic <topic>` (CLI convenience)
-4. No config (dbus only, backward compatible)

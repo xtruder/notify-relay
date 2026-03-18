@@ -8,11 +8,12 @@ import (
 	"github.com/xtruder/notify-relay/internal/channel"
 	"github.com/xtruder/notify-relay/internal/condition"
 	"github.com/xtruder/notify-relay/internal/protocol"
+	"github.com/xtruder/notify-relay/internal/remotes"
 )
 
 // Route defines a routing rule: when condition matches, use this channel
 type Route struct {
-	Condition string `json:"condition"` // e.g., "screen_locked", "always"
+	Condition string `json:"condition"` // e.g., "screen_locked", "always", "remote_unlocked"
 	Channel   string `json:"channel"`   // channel name
 }
 
@@ -26,6 +27,7 @@ type Router struct {
 	config     Config
 	channels   map[string]channel.Channel
 	conditions map[string]condition.Condition
+	manager    *remotes.Manager
 	mu         sync.RWMutex
 }
 
@@ -51,6 +53,61 @@ func New(cfg Config, evaluator condition.Evaluator, channels []channel.Channel) 
 	return r, nil
 }
 
+// NewWithRemotes creates a router with remote client forwarding support
+func NewWithRemotes(cfg Config, evaluator condition.Evaluator, channels []channel.Channel, manager *remotes.Manager) (*Router, error) {
+	r := &Router{
+		config:     cfg,
+		channels:   make(map[string]channel.Channel, len(channels)),
+		conditions: make(map[string]condition.Condition),
+		manager:    manager,
+	}
+
+	// Store channels by name
+	for _, ch := range channels {
+		r.channels[ch.Name()] = ch
+	}
+
+	// Register conditions
+	r.conditions[condition.Always{}.Name()] = condition.Always{}
+	if evaluator != nil {
+		r.conditions[condition.NewScreenLocked(evaluator).Name()] = condition.NewScreenLocked(evaluator)
+	}
+
+	// Register remote conditions if manager is available
+	if manager != nil {
+		r.conditions["remote_available"] = &RemoteAvailableCondition{manager: manager}
+		r.conditions["remote_unlocked"] = &RemoteUnlockedCondition{manager: manager}
+	}
+
+	return r, nil
+}
+
+// RemoteAvailableCondition checks if any remote client is connected
+type RemoteAvailableCondition struct {
+	manager *remotes.Manager
+}
+
+func (r *RemoteAvailableCondition) Name() string {
+	return "remote_available"
+}
+
+func (r *RemoteAvailableCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+	return r.manager.HasConnectedClient()
+}
+
+// RemoteUnlockedCondition checks if any remote client is unlocked
+type RemoteUnlockedCondition struct {
+	manager *remotes.Manager
+}
+
+func (r *RemoteUnlockedCondition) Name() string {
+	return "remote_unlocked"
+}
+
+func (r *RemoteUnlockedCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+	return r.manager.HasUnlockedClient()
+}
+
 // Notify routes a notification to the appropriate channel
 func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
 	r.mu.RLock()
@@ -69,6 +126,15 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 
 		ch, ok := r.channels[route.Channel]
 		if !ok {
+			// Special case: "forward" channel means forward to remote
+			if route.Channel == "forward" && r.manager != nil {
+				client := r.manager.FindBestClient()
+				if client != nil {
+					// Return a special response indicating remote forwarding
+					// The caller (server) handles the actual forwarding
+					return protocol.NotifyResponse{}, ErrForwardToRemote{Hostname: client.Hostname}
+				}
+			}
 			continue
 		}
 
@@ -76,6 +142,15 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 	}
 
 	return protocol.NotifyResponse{}, fmt.Errorf("no matching route found")
+}
+
+// ErrForwardToRemote is returned when notification should be forwarded to a remote client
+type ErrForwardToRemote struct {
+	Hostname string
+}
+
+func (e ErrForwardToRemote) Error() string {
+	return fmt.Sprintf("forward to remote client: %s", e.Hostname)
 }
 
 // CloseNotification closes a notification on all channels that support it

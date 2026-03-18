@@ -1,0 +1,9 @@
+version: v1
+name: buf.build/xtruder/notify-relay
+deps: []
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - DEFAULT

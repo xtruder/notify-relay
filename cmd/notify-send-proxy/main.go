@@ -1,23 +1,24 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xtruder/notify-relay/internal/buildinfo"
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 func main() {
@@ -42,8 +43,8 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 
-	endpoint, socketPath := relayTarget()
-	resp, err := send(endpoint, socketPath, os.Getenv("NOTIFY_RELAY_TOKEN"), parsed.Request)
+	endpoint, token := relayTarget()
+	resp, err := send(endpoint, token, parsed.Request)
 	if err != nil {
 		if os.Getenv("NOTIFY_SEND_FALLBACK") == "1" {
 			return fallbackNotifySend(args)
@@ -255,60 +256,93 @@ func parseAction(raw string, index int) (string, string) {
 }
 
 func relayTarget() (string, string) {
+	// Check for socket path first
 	if socketPath := os.Getenv("NOTIFY_RELAY_SOCKET"); socketPath != "" {
-		return "http://notify-relay", socketPath
+		return socketPath, ""
 	}
 	if runtime.GOOS == "linux" {
 		socketPath := fmt.Sprintf("/run/user/%d/notify-relay.sock", os.Getuid())
 		if _, err := os.Stat(socketPath); err == nil {
-			return "http://notify-relay", socketPath
+			return socketPath, ""
 		}
 	}
+
+	// Fall back to TCP
 	endpoint := os.Getenv("NOTIFY_RELAY_URL")
 	if endpoint == "" {
-		endpoint = "http://127.0.0.1:8787"
+		endpoint = "127.0.0.1:8787"
 	}
-	return endpoint, ""
+	token := os.Getenv("NOTIFY_RELAY_TOKEN")
+	return endpoint, token
 }
 
-func send(endpoint, socketPath, token string, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return protocol.NotifyResponse{}, fmt.Errorf("encode request: %w", err)
-	}
-	client := http.DefaultClient
-	if socketPath != "" {
-		client = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					var dialer net.Dialer
-					return dialer.DialContext(ctx, "unix", socketPath)
-				},
-			},
+func send(endpoint, token string, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Determine if this is a Unix socket or TCP
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	var conn *grpc.ClientConn
+	var err error
+
+	// Check if endpoint looks like a Unix socket path
+	if strings.HasPrefix(endpoint, "/") || strings.HasPrefix(endpoint, ".") {
+		// Unix socket
+		conn, err = grpc.DialContext(ctx, "passthrough:///unix://"+endpoint, opts...)
+	} else {
+		// TCP
+		if !strings.Contains(endpoint, ":") {
+			endpoint = endpoint + ":8787"
 		}
+		conn, err = grpc.DialContext(ctx, endpoint, opts...)
 	}
-	httpReq, err := http.NewRequest(http.MethodPost, strings.TrimRight(endpoint, "/")+"/notify", bytes.NewReader(body))
+
 	if err != nil {
-		return protocol.NotifyResponse{}, fmt.Errorf("build request: %w", err)
+		return protocol.NotifyResponse{}, fmt.Errorf("connect: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	defer conn.Close()
+
+	// Create client
+	client := notify_relayv1.NewRelayServiceClient(conn)
+
+	// Build gRPC request
+	grpcReq := &notify_relayv1.Notification{
+		AppName:       req.AppName,
+		ReplacesId:    req.ReplacesID,
+		AppIcon:       req.AppIcon,
+		Summary:       req.Summary,
+		Body:          req.Body,
+		Actions:       req.Actions,
+		ExpireTimeout: req.ExpireTimeout,
+		Wait:          req.Wait,
+		PrintId:       req.PrintID,
+	}
+
+	// Convert hints to map
+	grpcReq.Hints = make(map[string]string)
+	for _, hint := range req.Hints {
+		grpcReq.Hints[hint.Name] = hint.Value
+	}
+
+	// Add auth token if provided
 	if token != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
+		// gRPC metadata for auth
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
 	}
-	resp, err := client.Do(httpReq)
+
+	resp, err := client.Notify(ctx, grpcReq)
 	if err != nil {
-		return protocol.NotifyResponse{}, fmt.Errorf("send request: %w", err)
+		return protocol.NotifyResponse{}, fmt.Errorf("notify: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return protocol.NotifyResponse{}, fmt.Errorf("relay returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
-	}
-	var result protocol.NotifyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return protocol.NotifyResponse{}, fmt.Errorf("decode response: %w", err)
-	}
-	return result, nil
+
+	return protocol.NotifyResponse{
+		ID:        resp.Id,
+		Event:     resp.Event,
+		Reason:    resp.Reason,
+		ActionKey: resp.ActionKey,
+	}, nil
 }
 
 func fallbackNotifySend(args []string) (int, error) {
@@ -364,8 +398,8 @@ Drop-in notify-send proxy for a remote notification relay.
 
 Environment:
   NOTIFY_RELAY_SOCKET Relay Unix socket path
-  NOTIFY_RELAY_URL    Relay base URL (default fallback: http://127.0.0.1:8787)
-  NOTIFY_RELAY_TOKEN  Optional bearer token
+  NOTIFY_RELAY_URL    Relay host:port (default: 127.0.0.1:8787)
+  NOTIFY_RELAY_TOKEN  Bearer token for authentication
   NOTIFY_SEND_FALLBACK=1  Fall back to local notify-send if relay fails
 
 Supported options:

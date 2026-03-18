@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package notify_relay.v1;
+
+option go_package = "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1;notify_relayv1";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+// Notification represents a desktop notification
+message Notification {
+  string app_name = 1;
+  uint32 replaces_id = 2;
+  string app_icon = 3;
+  string summary = 4;
+  string body = 5;
+  repeated string actions = 6;
+  map<string, string> hints = 7;
+  int32 expire_timeout = 8;
+  bool wait = 9;
+  bool print_id = 10;
+}
+
+// NotificationResponse is returned after sending a notification
+message NotificationResponse {
+  uint32 id = 1;
+  string event = 2;
+  uint32 reason = 3;
+  string action_key = 4;
+}
+
+// CloseRequest is used to close a notification
+message CloseRequest {
+  uint32 id = 1;
+}
+
+// CloseResponse confirms a notification was closed
+message CloseResponse {
+  bool success = 1;
+}
+
+// CapabilitiesRequest asks for server capabilities
+message CapabilitiesRequest {}
+
+// CapabilitiesResponse lists what the server supports
+message CapabilitiesResponse {
+  repeated string capabilities = 1;
+}
+
+// ServerInfoRequest asks for server information
+message ServerInfoRequest {}
+
+// ServerInfoResponse provides server details
+message ServerInfoResponse {
+  string name = 1;
+  string vendor = 2;
+  string version = 3;
+  string spec = 4;
+}
+
+// HealthRequest is a simple health check
+message HealthRequest {}
+
+// HealthResponse confirms the server is healthy
+message HealthResponse {
+  string status = 1;
+}
+
+// LockStateUpdate is sent by clients to report their lock state
+message LockStateUpdate {
+  string hostname = 1;
+  bool is_locked = 2;
+  int64 timestamp = 3;
+}
+
+// HealthPing is a keepalive message from client to server
+message HealthPing {
+  int64 timestamp = 1;
+}
+
+// HealthPong is a response to HealthPing
+message HealthPong {
+  int64 timestamp = 1;
+}
+
+// ForwardedNotification is sent by server to client when forwarding
+message ForwardedNotification {
+  string source_hostname = 1;
+  Notification notification = 2;
+}
+
+// ClientListUpdate informs clients about other connected clients
+message ClientListUpdate {
+  repeated RemoteClient clients = 1;
+}
+
+// RemoteClient represents a connected remote client
+message RemoteClient {
+  string hostname = 1;
+  bool is_locked = 2;
+  int32 priority = 3;
+  bool is_connected = 4;
+}
+
+// ============================================================================
+// Client/Server Stream Messages
+// ============================================================================
+
+// ClientMessage is sent from client to server via the Connect stream
+message ClientMessage {
+  oneof message {
+    LockStateUpdate lock_state = 1;
+    HealthPing ping = 2;
+    NotificationResponse response = 3;
+  }
+}
+
+// ServerMessage is sent from server to client via the Connect stream
+message ServerMessage {
+  oneof message {
+    ForwardedNotification notification = 1;
+    HealthPong pong = 2;
+    ClientListUpdate client_list = 3;
+  }
+}
+
+// ============================================================================
+// Service
+// ============================================================================
+
+// RelayService is the main service for notification relay
+service RelayService {
+  // Notify sends a notification to the daemon
+  rpc Notify(Notification) returns (NotificationResponse);
+
+  // CloseNotification closes a notification by ID
+  rpc CloseNotification(CloseRequest) returns (CloseResponse);
+
+  // GetCapabilities returns the capabilities supported by the server
+  rpc GetCapabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
+
+  // GetServerInfo returns information about the server
+  rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse);
+
+  // Health returns the health status of the server
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Connect establishes a bidirectional stream for client-server communication
+  // Used by client mode daemons to connect to server mode daemons
+  rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+}
