@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,12 +106,24 @@ func (c *Client) Connect(ctx context.Context) error {
 func (c *Client) connectOnce(ctx context.Context) error {
 	// Setup connection options
 	var opts []grpc.DialOption
-
-	// Use insecure credentials for now (Unix socket) or with token
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
-	// Dial the server
-	conn, err := grpc.Dial(c.serverAddr, opts...)
+	var conn *grpc.ClientConn
+	var err error
+
+	// Check if serverAddr is a Unix socket path
+	if strings.HasPrefix(c.serverAddr, "/") || strings.HasPrefix(c.serverAddr, ".") {
+		// Unix socket - use custom dialer
+		opts = append(opts, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", c.serverAddr)
+		}))
+		conn, err = grpc.Dial("passthrough:///unix", opts...)
+	} else {
+		// TCP
+		conn, err = grpc.Dial(c.serverAddr, opts...)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to dial server: %w", err)
 	}
