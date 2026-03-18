@@ -1,4 +1,4 @@
-package notify
+package dbus
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/xtruder/notify-relay/internal/channel"
 	"github.com/xtruder/notify-relay/internal/protocol"
 )
 
@@ -16,13 +17,15 @@ const (
 	notificationInterface = "org.freedesktop.Notifications"
 )
 
+// Event represents a notification event
 type Event struct {
 	Name      string
 	Reason    uint32
 	ActionKey string
 }
 
-type Relay struct {
+// Channel implements channel.Channel for dbus notifications
+type Channel struct {
 	conn    *dbus.Conn
 	obj     dbus.BusObject
 	signals chan *dbus.Signal
@@ -31,20 +34,25 @@ type Relay struct {
 	waiters map[uint32]chan Event
 }
 
-func New() (*Relay, error) {
+// Compile-time interface check
+var _ channel.Channel = (*Channel)(nil)
+var _ channel.Closer = (*Channel)(nil)
+
+// New creates a new dbus notification channel
+func New() (*Channel, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("connect session bus: %w", err)
 	}
 
-	r := &Relay{
+	c := &Channel{
 		conn:    conn,
 		obj:     conn.Object(notificationInterface, notificationPath),
 		signals: make(chan *dbus.Signal, 32),
 		waiters: make(map[uint32]chan Event),
 	}
 
-	conn.Signal(r.signals)
+	conn.Signal(c.signals)
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchObjectPath(notificationPath),
 		dbus.WithMatchInterface(notificationInterface),
@@ -53,23 +61,30 @@ func New() (*Relay, error) {
 		return nil, fmt.Errorf("subscribe notification signals: %w", err)
 	}
 
-	go r.consumeSignals()
+	go c.consumeSignals()
 
-	return r, nil
+	return c, nil
 }
 
-func (r *Relay) Close() error {
-	r.conn.RemoveSignal(r.signals)
-	return r.conn.Close()
+// Name returns "dbus"
+func (c *Channel) Name() string {
+	return "dbus"
 }
 
-func (r *Relay) Notify(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
+// Close closes the dbus connection
+func (c *Channel) Close() error {
+	c.conn.RemoveSignal(c.signals)
+	return c.conn.Close()
+}
+
+// Send sends a notification over dbus (implements channel.Channel)
+func (c *Channel) Send(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
 	hints, err := buildHints(req.Hints)
 	if err != nil {
 		return protocol.NotifyResponse{}, err
 	}
 
-	call := r.obj.CallWithContext(ctx, notificationInterface+".Notify", 0,
+	call := c.obj.CallWithContext(ctx, notificationInterface+".Notify", 0,
 		req.AppName,
 		req.ReplacesID,
 		req.AppIcon,
@@ -93,8 +108,8 @@ func (r *Relay) Notify(ctx context.Context, req protocol.NotifyRequest) (protoco
 		return resp, nil
 	}
 
-	ch := r.registerWaiter(id)
-	defer r.unregisterWaiter(id, ch)
+	ch := c.registerWaiter(id)
+	defer c.unregisterWaiter(id, ch)
 
 	select {
 	case event := <-ch:
@@ -107,16 +122,18 @@ func (r *Relay) Notify(ctx context.Context, req protocol.NotifyRequest) (protoco
 	}
 }
 
-func (r *Relay) CloseNotification(ctx context.Context, id uint32) error {
-	call := r.obj.CallWithContext(ctx, notificationInterface+".CloseNotification", 0, id)
+// CloseNotification closes a notification by ID (implements channel.Closer)
+func (c *Channel) CloseNotification(ctx context.Context, id uint32) error {
+	call := c.obj.CallWithContext(ctx, notificationInterface+".CloseNotification", 0, id)
 	if call.Err != nil {
 		return fmt.Errorf("close notification: %w", call.Err)
 	}
 	return nil
 }
 
-func (r *Relay) Capabilities(ctx context.Context) ([]string, error) {
-	call := r.obj.CallWithContext(ctx, notificationInterface+".GetCapabilities", 0)
+// Capabilities returns the capabilities supported by the dbus notification server
+func (c *Channel) Capabilities(ctx context.Context) ([]string, error) {
+	call := c.obj.CallWithContext(ctx, notificationInterface+".GetCapabilities", 0)
 	if call.Err != nil {
 		return nil, fmt.Errorf("get capabilities: %w", call.Err)
 	}
@@ -127,8 +144,9 @@ func (r *Relay) Capabilities(ctx context.Context) ([]string, error) {
 	return capabilities, nil
 }
 
-func (r *Relay) ServerInformation(ctx context.Context) (protocol.ServerInfoResponse, error) {
-	call := r.obj.CallWithContext(ctx, notificationInterface+".GetServerInformation", 0)
+// ServerInfo returns information about the dbus notification server
+func (c *Channel) ServerInfo(ctx context.Context) (protocol.ServerInfoResponse, error) {
+	call := c.obj.CallWithContext(ctx, notificationInterface+".GetServerInformation", 0)
 	if call.Err != nil {
 		return protocol.ServerInfoResponse{}, fmt.Errorf("get server information: %w", call.Err)
 	}
@@ -139,8 +157,8 @@ func (r *Relay) ServerInformation(ctx context.Context) (protocol.ServerInfoRespo
 	return info, nil
 }
 
-func (r *Relay) consumeSignals() {
-	for signal := range r.signals {
+func (c *Channel) consumeSignals() {
+	for signal := range c.signals {
 		if signal == nil {
 			continue
 		}
@@ -153,7 +171,7 @@ func (r *Relay) consumeSignals() {
 			id, ok1 := signal.Body[0].(uint32)
 			reason, ok2 := signal.Body[1].(uint32)
 			if ok1 && ok2 {
-				r.dispatch(id, Event{Name: "closed", Reason: reason})
+				c.dispatch(id, Event{Name: "closed", Reason: reason})
 			}
 		case notificationInterface + ".ActionInvoked":
 			if len(signal.Body) != 2 {
@@ -162,37 +180,37 @@ func (r *Relay) consumeSignals() {
 			id, ok1 := signal.Body[0].(uint32)
 			actionKey, ok2 := signal.Body[1].(string)
 			if ok1 && ok2 {
-				r.dispatch(id, Event{Name: "action_invoked", ActionKey: actionKey})
+				c.dispatch(id, Event{Name: "action_invoked", ActionKey: actionKey})
 			}
 		}
 	}
 }
 
-func (r *Relay) registerWaiter(id uint32) chan Event {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (c *Channel) registerWaiter(id uint32) chan Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	ch := make(chan Event, 1)
-	r.waiters[id] = ch
+	c.waiters[id] = ch
 	return ch
 }
 
-func (r *Relay) unregisterWaiter(id uint32, ch chan Event) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	current, ok := r.waiters[id]
+func (c *Channel) unregisterWaiter(id uint32, ch chan Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, ok := c.waiters[id]
 	if ok && current == ch {
-		delete(r.waiters, id)
+		delete(c.waiters, id)
 		close(ch)
 	}
 }
 
-func (r *Relay) dispatch(id uint32, event Event) {
-	r.mu.Lock()
-	ch, ok := r.waiters[id]
+func (c *Channel) dispatch(id uint32, event Event) {
+	c.mu.Lock()
+	ch, ok := c.waiters[id]
 	if ok {
-		delete(r.waiters, id)
+		delete(c.waiters, id)
 	}
-	r.mu.Unlock()
+	c.mu.Unlock()
 	if !ok {
 		return
 	}

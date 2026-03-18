@@ -28,18 +28,32 @@ bash -n scripts/install.sh
 ruby -c Formula/notify-relay.rb
 ```
 
+Run tests:
+
+```bash
+go test ./...
+```
+
 ## Project layout
 
-- `cmd/notify-relayd`: host relay entrypoint
+- `cmd/notify-relayd`: host relay entrypoint supporting multiple notification channels
 - `cmd/notify-send-proxy`: `notify-send` compatible client
-- `internal/notify`: D-Bus integration with `org.freedesktop.Notifications`
+- `internal/channel`: channel interface definitions
+- `internal/dbus`: dbus notification channel implementation
+- `internal/ntfy`: ntfy.sh HTTP notification channel
+- `internal/router`: notification routing logic with condition evaluation
+- `internal/lock`: screen lock state detector via dbus
+- `internal/condition`: routing conditions (always, screen_locked)
 - `internal/server`: HTTP and Unix socket server
 - `internal/protocol`: shared request and response types
+- `internal/tests`: integration and scenario tests
 - `packaging/systemd`: user service unit
 - `packaging/homebrew`: tap formula template
 - `scripts/install.sh`: GitHub release installer
 
 ## Running locally
+
+### Basic (dbus only)
 
 Run the relay against the default Unix socket path:
 
@@ -54,6 +68,20 @@ NOTIFY_RELAY_SOCKET=/run/user/$(id -u)/notify-relay.sock \
   go run ./cmd/notify-send-proxy -- "Local test" "Hello from notify-relay"
 ```
 
+### With ntfy.sh phone notifications
+
+Run with automatic phone notifications when screen is locked:
+
+```bash
+go run ./cmd/notify-relayd --ntfy-topic my-test-topic
+```
+
+Or with a config file:
+
+```bash
+go run ./cmd/notify-relayd --config ~/.config/notify-relay.conf
+```
+
 Test TCP mode instead:
 
 ```bash
@@ -63,7 +91,29 @@ NOTIFY_RELAY_TOKEN="$(cat ~/.config/notify-relay/token)" \
   go run ./cmd/notify-send-proxy -- "TCP test" "Hello from notify-relay"
 ```
 
-## Testing the installer
+## Testing
+
+### Unit tests
+
+Mock-based tests that don't require external services:
+
+```bash
+go test ./internal/tests/... -v -run "TestRouter|TestCondition"
+```
+
+### Integration tests
+
+Tests that send actual notifications to ntfy.sh:
+
+```bash
+# Set your test topic via environment
+export TEST_NTFY_TOPIC=my-test-topic
+go test ./internal/tests/... -v -run "TestNtfy"
+```
+
+Note: In CI environments (`CI=true`), live ntfy tests are automatically skipped.
+
+### Testing the installer
 
 Test the local script syntax:
 
@@ -137,8 +187,8 @@ git push origin main
 Wait for `CI` and `Brew` on `main` to pass, then:
 
 ```bash
-git tag v0.1.x
-git push origin v0.1.x
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 The release workflow then:
@@ -149,6 +199,31 @@ The release workflow then:
 
 ## GitHub Actions
 
-- `CI`: formatting and build checks
+- `CI`: formatting, build checks, and tests
 - `Brew`: validates the formula on Linux and macOS
 - `Release`: builds tarballs, publishes GitHub releases, and syncs `xtruder/homebrew-tap`
+
+## Architecture
+
+### Multi-Channel Support
+
+The relay now supports multiple notification channels:
+
+1. **dbus** - Desktop notifications (original behavior)
+2. **ntfy** - HTTP-based push notifications to phones
+
+### Routing
+
+Notifications are routed based on configurable conditions:
+
+- `always` - Always matches (fallback)
+- `screen_locked` - Matches when screen is locked (via org.freedesktop.ScreenSaver)
+
+Routes are evaluated in order, first match wins.
+
+### Configuration Priority
+
+1. `--config <path>` flag (explicit)
+2. `~/.config/notify-relay.conf` (default)
+3. `--ntfy-topic <topic>` (CLI convenience)
+4. No config (dbus only, backward compatible)

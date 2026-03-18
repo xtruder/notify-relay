@@ -1,0 +1,27 @@
+{
+  "server": {
+    "listen": "127.0.0.1:8787"
+  },
+  "channels": {
+    "dbus": {
+      "type": "dbus"
+    },
+    "phone": {
+      "type": "ntfy",
+      "config": {
+        "server": "https://ntfy.sh",
+        "topic": "my-laptop-notifications"
+      }
+    }
+  },
+  "routes": [
+    {
+      "condition": "screen_locked",
+      "channel": "phone"
+    },
+    {
+      "condition": "always",
+      "channel": "dbus"
+    }
+  ]
+}

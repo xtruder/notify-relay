@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xtruder/notify-relay/internal/notify"
 	"github.com/xtruder/notify-relay/internal/protocol"
+	"github.com/xtruder/notify-relay/internal/router"
 )
 
 type Config struct {
@@ -26,14 +26,14 @@ type Config struct {
 }
 
 type Server struct {
-	relay *notify.Relay
-	cfg   Config
-	http  *http.Server
-	ln    net.Listener
+	router *router.Router
+	cfg    Config
+	http   *http.Server
+	ln     net.Listener
 }
 
-func New(cfg Config, relay *notify.Relay) (*Server, error) {
-	s := &Server{cfg: cfg, relay: relay}
+func New(cfg Config, r *router.Router) (*Server, error) {
+	s := &Server{cfg: cfg, router: r}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/notify", s.handleNotify)
@@ -118,7 +118,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, protocol.ErrorResponse{Error: err.Error()})
 		return
 	}
-	resp, err := s.relay.Notify(r.Context(), req)
+	resp, err := s.router.Notify(r.Context(), req)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, protocol.ErrorResponse{Error: err.Error()})
 		return
@@ -136,7 +136,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, protocol.ErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := s.relay.CloseNotification(r.Context(), req.ID); err != nil {
+	if err := s.router.CloseNotification(r.Context(), req.ID); err != nil {
 		writeJSON(w, http.StatusBadGateway, protocol.ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -148,7 +148,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, protocol.ErrorResponse{Error: "method not allowed"})
 		return
 	}
-	capabilities, err := s.relay.Capabilities(r.Context())
+	capabilities, err := s.router.Capabilities(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, protocol.ErrorResponse{Error: err.Error()})
 		return
@@ -161,13 +161,14 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, protocol.ErrorResponse{Error: "method not allowed"})
 		return
 	}
-	info, err := s.relay.ServerInformation(r.Context())
+	info, err := s.router.ServerInformation(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, protocol.ErrorResponse{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
 }
+
 func decodeJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
