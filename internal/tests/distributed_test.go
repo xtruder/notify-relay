@@ -8,9 +8,13 @@ import (
 	"time"
 
 	"github.com/xtruder/notify-relay/internal/channel"
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
+	"github.com/xtruder/notify-relay/internal/protocol"
 	"github.com/xtruder/notify-relay/internal/remotes"
 	"github.com/xtruder/notify-relay/internal/router"
 	"github.com/xtruder/notify-relay/internal/server"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TestUnixSocketConnection tests client connection via Unix socket
@@ -579,4 +583,133 @@ func skipIfNoDbus(t *testing.T) {
 	if os.Getenv("CI") == "true" {
 		t.Skip("Skipping DBus test in CI")
 	}
+}
+
+// ============================================================================
+// Integration Tests for Remote Forwarding
+// ============================================================================
+
+// recordingChannel wraps mockChannel to capture received notifications
+type recordingChannel struct {
+	*mockChannel
+	received []protocol.NotifyRequest
+}
+
+func (r *recordingChannel) Send(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
+	r.received = append(r.received, req)
+	return r.mockChannel.Send(ctx, req)
+}
+
+func (r *recordingChannel) GetReceived() []protocol.NotifyRequest {
+	return r.received
+}
+
+func (r *recordingChannel) Clear() {
+	r.received = nil
+}
+
+// TestInboundForwardingUnlocked tests that notifications are forwarded to unlocked inbound remotes
+func TestInboundForwardingUnlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	serverSocket := filepath.Join(tmpDir, "server.sock")
+
+	// Create recording channel for local fallback
+	localCh := &recordingChannel{
+		mockChannel: &mockChannel{name: "local", capabilities: []string{"body"}},
+	}
+
+	// Create router with remote_unlocked -> forward, always -> local
+	manager := remotes.NewManager()
+	routerCfg := router.Config{
+		Routes: []router.Route{
+			{Condition: "remote_unlocked", Channel: "forward"},
+			{Condition: "always", Channel: "local"},
+		},
+		RemoteTimeout: 500 * time.Millisecond, // Short timeout for tests
+	}
+
+	r, err := router.NewWithRemotes(routerCfg, nil, []channel.Channel{localCh}, manager)
+	if err != nil {
+		t.Fatalf("Failed to create router: %v", err)
+	}
+	defer r.Close()
+
+	// Create and start server
+	srv, err := server.NewGRPCServer(server.Config{Unix: serverSocket}, r)
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+	srv.SetRemoteManager(manager)
+	defer srv.Shutdown(context.Background())
+
+	go srv.Serve()
+	time.Sleep(100 * time.Millisecond)
+
+	// Create inbound client (connects to server)
+	client := remotes.NewClient(remotes.ClientConfig{
+		ServerAddr: serverSocket,
+		Hostname:   "inbound-client",
+		LockState:  nil,
+	})
+
+	// Track received notifications
+	var receivedNotif *notify_relayv1.ForwardedNotification
+	client.SetCallbacks(
+		func() { t.Log("Client connected") },
+		func() { t.Log("Client disconnected") },
+		func(notif *notify_relayv1.ForwardedNotification) {
+			receivedNotif = notif
+			t.Logf("Client received notification: %s", notif.Notification.Summary)
+		},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go client.Connect(ctx)
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify client connected
+	if !manager.HasConnectedRemote() {
+		t.Fatal("Expected client to be connected")
+	}
+
+	// Set client as unlocked
+	manager.UpdateLockState("inbound-client", false)
+
+	// Send notification via gRPC Notify method (simulating proxy)
+	conn, err := grpc.Dial("unix://"+serverSocket, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("Failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	clientGRPC := notify_relayv1.NewRelayServiceClient(conn)
+	resp, err := clientGRPC.Notify(context.Background(), &notify_relayv1.Notification{
+		AppName: "test",
+		Summary: "Test Forwarding",
+		Body:    "This should be forwarded to unlocked remote",
+	})
+	if err != nil {
+		t.Fatalf("Notify failed: %v", err)
+	}
+
+	t.Logf("Notify succeeded with ID: %d", resp.Id)
+
+	// Wait a bit for forwarding
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify notification was forwarded to client, not to local channel
+	if receivedNotif == nil {
+		t.Error("Expected client to receive forwarded notification")
+	}
+	if len(localCh.GetReceived()) != 0 {
+		t.Errorf("Expected 0 local notifications, got %d", len(localCh.GetReceived()))
+	}
+
+	if receivedNotif != nil && receivedNotif.Notification.Summary == "Test Forwarding" {
+		t.Log("✓ Notification correctly forwarded to unlocked inbound remote")
+	}
+
+	client.Close()
 }
