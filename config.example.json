@@ -1,7 +1,21 @@
 {
+  "_comment": "Complete configuration example for notify-relay",
+  "mode": "standalone",
+  
   "server": {
-    "listen": "127.0.0.1:8787"
+    "listen": "127.0.0.1:8787",
+    "unix": "/run/user/1000/notify-relay.sock",
+    "token": "optional-bearer-token"
   },
+  
+  "socket_watch": {
+    "_comment": "Watch for forwarded sockets from remote clients (SSH RemoteForward)",
+    "paths": [
+      "/run/user/1000/notify-relay.sock"
+    ],
+    "pattern": "/run/user/1000/notify-relay-*.sock"
+  },
+  
   "channels": {
     "dbus": {
       "type": "dbus"
@@ -10,11 +24,17 @@
       "type": "ntfy",
       "config": {
         "server": "https://ntfy.sh",
-        "topic": "my-laptop-notifications"
+        "topic": "my-laptop-notifications",
+        "token": "optional-ntfy-token"
       }
     }
   },
+  
   "routes": [
+    {
+      "condition": "remote_unlocked",
+      "channel": "forward"
+    },
     {
       "condition": "screen_locked",
       "channel": "phone"
@@ -22,6 +42,23 @@
     {
       "condition": "always",
       "channel": "dbus"
+    }
+  ],
+  
+  "remote": {
+    "host": "server.example.com:8787",
+    "name": "laptop-work",
+    "token": "auth-token"
+  },
+  
+  "remotes": [
+    {
+      "name": "laptop-work",
+      "priority": 1
+    },
+    {
+      "name": "laptop-personal", 
+      "priority": 2
     }
   ]
 }

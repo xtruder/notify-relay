@@ -38,6 +38,12 @@ type RouteConfig struct {
 	Channel   string `json:"channel"`
 }
 
+// SocketWatchConfig holds configuration for socket watching
+type SocketWatchConfig struct {
+	Paths   []string `json:"paths"`   // Specific socket files to watch
+	Pattern string   `json:"pattern"` // Pattern like "/run/user/1000/notify-relay-*.sock"
+}
+
 // RemoteConfig holds configuration for remote connections
 type RemoteConfig struct {
 	Name     string `json:"name"`
@@ -48,12 +54,13 @@ type RemoteConfig struct {
 
 // Config holds the full application configuration
 type Config struct {
-	Mode     string                   `json:"mode"`
-	Server   server.Config            `json:"server"`
-	Remote   RemoteConfig             `json:"remote"`
-	Channels map[string]ChannelConfig `json:"channels"`
-	Routes   []RouteConfig            `json:"routes"`
-	Remotes  []RemoteConfig           `json:"remotes"` // for server: known remotes with priorities
+	Mode        string                   `json:"mode"`
+	Server      server.Config            `json:"server"`
+	Remote      RemoteConfig             `json:"remote"`
+	SocketWatch SocketWatchConfig        `json:"socket_watch"`
+	Channels    map[string]ChannelConfig `json:"channels"`
+	Routes      []RouteConfig            `json:"routes"`
+	Remotes     []RemoteConfig           `json:"remotes"` // for server: known remotes with priorities
 }
 
 func main() {
@@ -63,18 +70,24 @@ func main() {
 	var remoteHost string
 	var remoteName string
 	var remoteToken string
+	var watchSocket string   // Server: watch for specific forwarded socket
+	var inboundSocket string // Client: create listening socket for server to connect
+	var watchPattern string  // Server: watch directory for socket pattern
 	var showVersion bool
 
-	flag.StringVar(&cfg.Mode, "mode", "standalone", "Daemon mode: standalone, server, or client")
+	flag.StringVar(&cfg.Mode, "mode", "standalone", "Daemon mode: standalone, server, client, server-inbound, or client-inbound")
 	flag.StringVar(&cfg.Server.Listen, "listen", "127.0.0.1:8787", "TCP listen address")
 	flag.StringVar(&cfg.Server.Unix, "unix", "", "Unix socket path instead of TCP")
 	flag.StringVar(&cfg.Server.Token, "token", os.Getenv("NOTIFY_RELAY_TOKEN"), "Bearer token for API authentication")
 	flag.StringVar(&cfg.Server.TokenFile, "token-file", "", "File containing bearer token")
 	flag.StringVar(&configFile, "config", "", "Configuration file (JSON). Default: ~/.config/notify-relay.conf")
 	flag.StringVar(&ntfyTopic, "ntfy-topic", os.Getenv("NOTIFY_RELAY_NTFY_TOPIC"), "ntfy.sh topic for phone notifications when screen is locked")
-	flag.StringVar(&remoteHost, "remote-host", os.Getenv("NOTIFY_RELAY_REMOTE_HOST"), "Server address for client mode")
+	flag.StringVar(&remoteHost, "remote-host", os.Getenv("NOTIFY_RELAY_REMOTE_HOST"), "Server address for client mode (outbound connection)")
 	flag.StringVar(&remoteName, "remote-name", os.Getenv("NOTIFY_RELAY_REMOTE_NAME"), "Client hostname (defaults to system hostname)")
 	flag.StringVar(&remoteToken, "remote-token", os.Getenv("NOTIFY_RELAY_REMOTE_TOKEN"), "Token for client mode authentication")
+	flag.StringVar(&watchSocket, "watch-socket", "", "Server: Watch for specific forwarded socket file and connect to it")
+	flag.StringVar(&inboundSocket, "inbound-socket", "", "Client: Create listening socket for server to connect (instead of connecting out)")
+	flag.StringVar(&watchPattern, "watch-pattern", "", "Server: Watch directory for sockets matching pattern (e.g., 'notify-relay-*.sock')")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.Parse()
 
@@ -113,6 +126,13 @@ func main() {
 		cfg.Remote.Host = remoteHost
 		cfg.Remote.Name = remoteName
 		cfg.Remote.Token = remoteToken
+	}
+	// Socket watching paths can be added to config
+	if watchSocket != "" {
+		cfg.SocketWatch.Paths = append(cfg.SocketWatch.Paths, watchSocket)
+	}
+	if watchPattern != "" {
+		cfg.SocketWatch.Pattern = watchPattern
 	}
 
 	// Initialize based on mode
@@ -170,6 +190,25 @@ func runServerMode(cfg Config) {
 
 	// Create remote manager
 	manager := remotes.NewManager()
+
+	// Start outbound watcher if configured
+	if len(cfg.SocketWatch.Paths) > 0 || cfg.SocketWatch.Pattern != "" {
+		outboundWatcher := remotes.NewOutboundWatcher(
+			manager,
+			cfg.SocketWatch.Paths,
+			cfg.SocketWatch.Pattern,
+			"server",
+		)
+
+		go func() {
+			if err := outboundWatcher.Start(context.Background()); err != nil {
+				log.Printf("Outbound watcher error: %v", err)
+			}
+		}()
+		defer outboundWatcher.Stop()
+
+		log.Printf("Watching for sockets: paths=%v, pattern=%s", cfg.SocketWatch.Paths, cfg.SocketWatch.Pattern)
+	}
 
 	// Create router with remote forwarding support
 	r, err := router.NewWithRemotes(routerCfg, lockDetector, channels, manager)

@@ -46,24 +46,25 @@ func (s *Server) HandleConnect(stream notify_relayv1.RelayService_ConnectServer)
 		return fmt.Errorf("client hostname cannot be empty")
 	}
 
-	// Create client info
-	client := &ClientInfo{
+	// Create remote info
+	remote := &Remote{
 		Hostname:     hostname,
 		IsLocked:     lockUpdate.IsLocked,
 		Priority:     0, // Will be configured
+		Type:         RemoteTypeInbound,
 		ServerStream: stream,
 		ConnectedAt:  time.Now(),
 		LastSeen:     time.Now(),
 		ResponseChan: make(chan *notify_relayv1.NotificationResponse, 1),
 	}
 
-	// Add client to manager
-	if err := s.manager.AddClient(client); err != nil {
+	// Add remote to manager
+	if err := s.manager.AddRemote(remote); err != nil {
 		return err
 	}
-	defer s.manager.RemoveClient(hostname)
+	defer s.manager.RemoveRemote(hostname)
 
-	log.Printf("Remote client connected: %s (locked: %v)", hostname, client.IsLocked)
+	log.Printf("Remote inbound connected: %s (locked: %v)", hostname, remote.IsLocked)
 
 	// Start goroutine to send periodic pings
 	pingDone := make(chan struct{})
@@ -92,30 +93,33 @@ func (s *Server) HandleConnect(stream notify_relayv1.RelayService_ConnectServer)
 		// Update last seen
 		s.manager.UpdateLastSeen(hostname)
 
+		// Get remote for handling message
+		remote, _ := s.manager.GetRemote(hostname)
+		if remote == nil {
+			continue
+		}
+
 		// Handle message
-		if err := s.handleClientMessage(hostname, msg, client); err != nil {
+		if err := s.handleClientMessage(hostname, msg, remote); err != nil {
 			log.Printf("Error handling message from %s: %v", hostname, err)
 		}
 	}
 }
 
-func (s *Server) handleClientMessage(hostname string, msg *notify_relayv1.ClientMessage, client *ClientInfo) error {
+func (s *Server) handleClientMessage(hostname string, msg *notify_relayv1.ClientMessage, remote *Remote) error {
 	switch m := msg.Message.(type) {
 	case *notify_relayv1.ClientMessage_LockState:
 		s.manager.UpdateLockState(hostname, m.LockState.IsLocked)
 		log.Printf("Lock state update from %s: locked=%v", hostname, m.LockState.IsLocked)
-
-		// Broadcast updated client list to all clients
-		s.manager.BroadcastClientList()
 
 	case *notify_relayv1.ClientMessage_Ping:
 		// Just updating last seen is enough, pong sent by sendPings goroutine
 
 	case *notify_relayv1.ClientMessage_Response:
 		// Forward response to the waiting request
-		if client.ResponseChan != nil {
+		if remote.ResponseChan != nil {
 			select {
-			case client.ResponseChan <- m.Response:
+			case remote.ResponseChan <- m.Response:
 			default:
 				// Channel full or closed, drop response
 			}

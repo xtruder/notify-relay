@@ -163,7 +163,7 @@ func TestServerWithRemoteClient(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify client is connected
-	if !manager.HasConnectedClient() {
+	if !manager.HasConnectedRemote() {
 		t.Fatal("Expected client to be connected")
 	}
 
@@ -171,7 +171,7 @@ func TestServerWithRemoteClient(t *testing.T) {
 	manager.UpdateLockState("laptop-test", false)
 
 	// Check unlocked client is found
-	bestClient := manager.FindBestClient()
+	bestClient := manager.FindBestRemote()
 	if bestClient == nil {
 		t.Fatal("Expected to find unlocked client")
 	}
@@ -185,7 +185,7 @@ func TestServerWithRemoteClient(t *testing.T) {
 	manager.UpdateLockState("laptop-test", true)
 
 	// Should no longer find unlocked client
-	bestClient = manager.FindBestClient()
+	bestClient = manager.FindBestRemote()
 	if bestClient != nil {
 		t.Error("Expected no unlocked client when locked")
 	}
@@ -331,7 +331,7 @@ func TestSSHRemoteForwardScenario(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify server sees the client
-	if !manager.HasConnectedClient() {
+	if !manager.HasConnectedRemote() {
 		t.Error("Server should see connected client")
 	}
 
@@ -341,14 +341,14 @@ func TestSSHRemoteForwardScenario(t *testing.T) {
 
 	// Simulate unlocked - should forward to remote
 	manager.UpdateLockState("laptop-via-ssh", false)
-	if !manager.HasUnlockedClient() {
+	if !manager.HasUnlockedRemote() {
 		t.Error("Expected unlocked client")
 	}
 
 	// Simulate locked
 	manager.UpdateLockState("laptop-via-ssh", true)
 
-	if manager.HasUnlockedClient() {
+	if manager.HasUnlockedRemote() {
 		t.Error("Expected no unlocked client after lock")
 	}
 
@@ -404,7 +404,7 @@ func TestMultiLaptopPriority(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Both should be connected
-	clients := manager.GetAllClients()
+	clients := manager.GetAllRemotes()
 	if len(clients) != 2 {
 		t.Fatalf("Expected 2 clients, got %d", len(clients))
 	}
@@ -416,7 +416,7 @@ func TestMultiLaptopPriority(t *testing.T) {
 	manager.UpdateLockState("laptop-personal", false)
 
 	// Find best client should return one of them (both unlocked)
-	best := manager.FindBestClient()
+	best := manager.FindBestRemote()
 	if best == nil {
 		t.Fatal("Expected to find a best client")
 	}
@@ -425,7 +425,7 @@ func TestMultiLaptopPriority(t *testing.T) {
 	manager.UpdateLockState("laptop-work", true)
 
 	// Best should now be laptop-personal
-	best = manager.FindBestClient()
+	best = manager.FindBestRemote()
 	if best == nil {
 		t.Fatal("Expected to find best client after locking work laptop")
 	}

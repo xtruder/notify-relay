@@ -114,7 +114,7 @@ func (s *GRPCServer) Notify(ctx context.Context, req *notify_relayv1.Notificatio
 		// Check if we should forward to remote
 		if forwardErr, ok := err.(router.ErrForwardToRemote); ok {
 			// Forward to remote client
-			client, exists := s.manager.GetClient(forwardErr.Hostname)
+			client, exists := s.manager.GetRemote(forwardErr.Hostname)
 			if !exists {
 				return nil, status.Errorf(codes.Unavailable, "remote client %s disconnected", forwardErr.Hostname)
 			}

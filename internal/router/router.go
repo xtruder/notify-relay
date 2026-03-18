@@ -82,7 +82,7 @@ func NewWithRemotes(cfg Config, evaluator condition.Evaluator, channels []channe
 	return r, nil
 }
 
-// RemoteAvailableCondition checks if any remote client is connected
+// RemoteAvailableCondition checks if any remote is connected
 type RemoteAvailableCondition struct {
 	manager *remotes.Manager
 }
@@ -92,10 +92,10 @@ func (r *RemoteAvailableCondition) Name() string {
 }
 
 func (r *RemoteAvailableCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
-	return r.manager.HasConnectedClient()
+	return r.manager.HasConnectedRemote()
 }
 
-// RemoteUnlockedCondition checks if any remote client is unlocked
+// RemoteUnlockedCondition checks if any remote is unlocked
 type RemoteUnlockedCondition struct {
 	manager *remotes.Manager
 }
@@ -105,7 +105,7 @@ func (r *RemoteUnlockedCondition) Name() string {
 }
 
 func (r *RemoteUnlockedCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
-	return r.manager.HasUnlockedClient()
+	return r.manager.HasUnlockedRemote()
 }
 
 // Notify routes a notification to the appropriate channel
@@ -128,11 +128,11 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 		if !ok {
 			// Special case: "forward" channel means forward to remote
 			if route.Channel == "forward" && r.manager != nil {
-				client := r.manager.FindBestClient()
-				if client != nil {
+				remote := r.manager.FindBestRemote()
+				if remote != nil {
 					// Return a special response indicating remote forwarding
 					// The caller (server) handles the actual forwarding
-					return protocol.NotifyResponse{}, ErrForwardToRemote{Hostname: client.Hostname}
+					return protocol.NotifyResponse{}, ErrForwardToRemote{Hostname: remote.Hostname}
 				}
 			}
 			continue

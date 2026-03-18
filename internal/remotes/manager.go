@@ -9,63 +9,75 @@ import (
 	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 )
 
-// ClientInfo represents a connected remote client
-type ClientInfo struct {
+// RemoteType indicates the direction of the remote connection
+type RemoteType string
+
+const (
+	RemoteTypeInbound  RemoteType = "inbound"  // Other connects to us (gRPC server stream)
+	RemoteTypeOutbound RemoteType = "outbound" // We connect to other (gRPC client stream)
+)
+
+// Remote represents a peer that can receive notifications
+type Remote struct {
 	Hostname     string
 	IsLocked     bool
 	Priority     int
-	ServerStream notify_relayv1.RelayService_ConnectServer
+	Type         RemoteType
 	ConnectedAt  time.Time
 	LastSeen     time.Time
 	ResponseChan chan *notify_relayv1.NotificationResponse
+
+	// Connection-specific fields
+	ServerStream notify_relayv1.RelayService_ConnectServer // For inbound (we send to them)
+	ClientStream notify_relayv1.RelayService_ConnectClient // For outbound (we send to them)
 }
 
-// Manager tracks all connected remote clients
+// Manager tracks all remote connections (both inbound and outbound)
 type Manager struct {
-	clients  map[string]*ClientInfo // hostname -> client
+	remotes  map[string]*Remote // hostname -> remote
 	mu       sync.RWMutex
 	onChange func(hostname string, connected bool)
 }
 
-// NewManager creates a new remote client manager
+// NewManager creates a new remote manager
 func NewManager() *Manager {
 	return &Manager{
-		clients: make(map[string]*ClientInfo),
+		remotes: make(map[string]*Remote),
 	}
 }
 
-// SetChangeCallback sets a callback to be called when client connections change
+// SetChangeCallback sets a callback for connection changes
 func (m *Manager) SetChangeCallback(cb func(hostname string, connected bool)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onChange = cb
 }
 
-// AddClient adds a new client to the manager
-func (m *Manager) AddClient(client *ClientInfo) error {
+// AddRemote adds a new remote connection
+func (m *Manager) AddRemote(remote *Remote) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.clients[client.Hostname]; exists {
-		return fmt.Errorf("client %s already connected", client.Hostname)
+	if _, exists := m.remotes[remote.Hostname]; exists {
+		return fmt.Errorf("remote %s already connected", remote.Hostname)
 	}
 
-	m.clients[client.Hostname] = client
+	m.remotes[remote.Hostname] = remote
 
 	if m.onChange != nil {
-		go m.onChange(client.Hostname, true)
+		go m.onChange(remote.Hostname, true)
 	}
 
 	return nil
 }
 
-// RemoveClient removes a client from the manager
-func (m *Manager) RemoveClient(hostname string) {
+// RemoveRemote removes a remote connection
+func (m *Manager) RemoveRemote(hostname string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.clients[hostname]; exists {
-		delete(m.clients, hostname)
+	if _, exists := m.remotes[hostname]; exists {
+		delete(m.remotes, hostname)
 
 		if m.onChange != nil {
 			go m.onChange(hostname, false)
@@ -73,112 +85,122 @@ func (m *Manager) RemoveClient(hostname string) {
 	}
 }
 
-// UpdateLockState updates the lock state of a client
+// UpdateLockState updates the lock state of a remote
 func (m *Manager) UpdateLockState(hostname string, isLocked bool) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	client, exists := m.clients[hostname]
+	remote, exists := m.remotes[hostname]
 	if !exists {
 		return false
 	}
 
-	client.IsLocked = isLocked
-	client.LastSeen = time.Now()
+	remote.IsLocked = isLocked
+	remote.LastSeen = time.Now()
 	return true
 }
 
-// UpdateLastSeen updates the last seen timestamp for a client
+// UpdateLastSeen updates the last seen timestamp
 func (m *Manager) UpdateLastSeen(hostname string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if client, exists := m.clients[hostname]; exists {
-		client.LastSeen = time.Now()
+	if remote, exists := m.remotes[hostname]; exists {
+		remote.LastSeen = time.Now()
 	}
 }
 
-// GetClient retrieves a client by hostname
-func (m *Manager) GetClient(hostname string) (*ClientInfo, bool) {
+// GetRemote retrieves a remote by hostname
+func (m *Manager) GetRemote(hostname string) (*Remote, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	client, exists := m.clients[hostname]
-	return client, exists
+	remote, exists := m.remotes[hostname]
+	return remote, exists
 }
 
-// GetAllClients returns a copy of all connected clients
-func (m *Manager) GetAllClients() map[string]*ClientInfo {
+// GetAllRemotes returns all connected remotes
+func (m *Manager) GetAllRemotes() map[string]*Remote {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	result := make(map[string]*ClientInfo, len(m.clients))
-	for k, v := range m.clients {
+	result := make(map[string]*Remote, len(m.remotes))
+	for k, v := range m.remotes {
 		result[k] = v
 	}
 	return result
 }
 
-// FindBestClient returns the highest priority unlocked client
-// Returns nil if no unlocked clients are connected
-func (m *Manager) FindBestClient() *ClientInfo {
+// FindBestRemote returns the highest priority unlocked remote
+// Returns nil if no unlocked remotes are connected
+func (m *Manager) FindBestRemote() *Remote {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var bestClient *ClientInfo
+	var bestRemote *Remote
 	bestPriority := int(^uint(0) >> 1) // Max int
 
-	for _, client := range m.clients {
-		if !client.IsLocked && client.Priority < bestPriority {
-			bestClient = client
-			bestPriority = client.Priority
+	for _, remote := range m.remotes {
+		if !remote.IsLocked && remote.Priority < bestPriority {
+			bestRemote = remote
+			bestPriority = remote.Priority
 		}
 	}
 
-	return bestClient
+	return bestRemote
 }
 
-// HasUnlockedClient returns true if any client is unlocked
-func (m *Manager) HasUnlockedClient() bool {
+// HasUnlockedRemote returns true if any remote is unlocked
+func (m *Manager) HasUnlockedRemote() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for _, client := range m.clients {
-		if !client.IsLocked {
+	for _, remote := range m.remotes {
+		if !remote.IsLocked {
 			return true
 		}
 	}
 	return false
 }
 
-// HasConnectedClient returns true if any client is connected
-func (m *Manager) HasConnectedClient() bool {
+// HasConnectedRemote returns true if any remote is connected
+func (m *Manager) HasConnectedRemote() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return len(m.clients) > 0
+	return len(m.remotes) > 0
 }
 
-// ForwardNotification sends a notification to a specific client
+// ForwardNotification sends a notification to a specific remote
 func (m *Manager) ForwardNotification(ctx context.Context, hostname string, notification *notify_relayv1.ForwardedNotification) (*notify_relayv1.NotificationResponse, error) {
-	client, exists := m.GetClient(hostname)
+	remote, exists := m.GetRemote(hostname)
 	if !exists {
-		return nil, fmt.Errorf("client %s not connected", hostname)
+		return nil, fmt.Errorf("remote %s not connected", hostname)
 	}
 
 	// Create response channel for this request
 	responseChan := make(chan *notify_relayv1.NotificationResponse, 1)
-	client.ResponseChan = responseChan
+	remote.ResponseChan = responseChan
 
-	// Send notification via stream
-	msg := &notify_relayv1.ServerMessage{
-		Message: &notify_relayv1.ServerMessage_Notification{
-			Notification: notification,
-		},
+	var err error
+	if remote.Type == RemoteTypeInbound && remote.ServerStream != nil {
+		// Send notification via server stream (inbound remote)
+		msg := &notify_relayv1.ServerMessage{
+			Message: &notify_relayv1.ServerMessage_Notification{
+				Notification: notification,
+			},
+		}
+		err = remote.ServerStream.Send(msg)
+	} else if remote.Type == RemoteTypeOutbound && remote.ClientStream != nil {
+		// For outbound connections, we'd need bidirectional streaming in the protocol
+		// For now, this is not supported - outbound remotes are clients, not servers
+		return nil, fmt.Errorf("sending notifications to outbound remotes not yet supported")
+	} else {
+		return nil, fmt.Errorf("remote %s has no valid stream", hostname)
 	}
 
-	if err := client.ServerStream.Send(msg); err != nil {
-		return nil, fmt.Errorf("failed to send to client %s: %w", hostname, err)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send to remote %s: %w", hostname, err)
 	}
 
 	// Wait for response with timeout
@@ -188,11 +210,11 @@ func (m *Manager) ForwardNotification(ctx context.Context, hostname string, noti
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for response from client %s", hostname)
+		return nil, fmt.Errorf("timeout waiting for response from remote %s", hostname)
 	}
 }
 
-// CleanupDisconnected removes clients that haven't been seen for a while
+// CleanupDisconnected removes remotes that haven't been seen for a while
 func (m *Manager) CleanupDisconnected(timeout time.Duration) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -200,53 +222,12 @@ func (m *Manager) CleanupDisconnected(timeout time.Duration) []string {
 	now := time.Now()
 	removed := make([]string, 0)
 
-	for hostname, client := range m.clients {
-		if now.Sub(client.LastSeen) > timeout {
-			delete(m.clients, hostname)
+	for hostname, remote := range m.remotes {
+		if now.Sub(remote.LastSeen) > timeout {
+			delete(m.remotes, hostname)
 			removed = append(removed, hostname)
 		}
 	}
 
 	return removed
-}
-
-// GetClientListUpdate returns a ClientListUpdate message for broadcasting
-func (m *Manager) GetClientListUpdate() *notify_relayv1.ClientListUpdate {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	clients := make([]*notify_relayv1.RemoteClient, 0, len(m.clients))
-	for hostname, client := range m.clients {
-		clients = append(clients, &notify_relayv1.RemoteClient{
-			Hostname:    hostname,
-			IsLocked:    client.IsLocked,
-			Priority:    int32(client.Priority),
-			IsConnected: true,
-		})
-	}
-
-	return &notify_relayv1.ClientListUpdate{
-		Clients: clients,
-	}
-}
-
-// BroadcastClientList sends the client list to all connected clients
-func (m *Manager) BroadcastClientList() {
-	update := m.GetClientListUpdate()
-	clients := m.GetAllClients()
-
-	for hostname, client := range clients {
-		msg := &notify_relayv1.ServerMessage{
-			Message: &notify_relayv1.ServerMessage_ClientList{
-				ClientList: update,
-			},
-		}
-
-		// Don't block on send failures
-		go func(c *ClientInfo, h string) {
-			if err := c.ServerStream.Send(msg); err != nil {
-				// Client might be disconnected, will be cleaned up later
-			}
-		}(client, hostname)
-	}
 }
