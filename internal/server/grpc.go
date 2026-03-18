@@ -92,6 +92,14 @@ func (s *GRPCServer) Serve() error {
 // Shutdown gracefully stops the server
 func (s *GRPCServer) Shutdown(ctx context.Context) error {
 	s.grpcServer.GracefulStop()
+
+	// Clean up Unix socket file if applicable
+	if s.config.Unix != "" {
+		if err := os.Remove(s.config.Unix); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: failed to remove socket file: %v", err)
+		}
+	}
+
 	return nil
 }
 
