@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,8 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spf13/pflag"
 	"github.com/xtruder/notify-relay/internal/buildinfo"
 	"github.com/xtruder/notify-relay/internal/channel"
+	"github.com/xtruder/notify-relay/internal/config"
 	"github.com/xtruder/notify-relay/internal/dbus"
 	"github.com/xtruder/notify-relay/internal/lock"
 	"github.com/xtruder/notify-relay/internal/ntfy"
@@ -26,86 +27,60 @@ import (
 	"github.com/xtruder/notify-relay/internal/server"
 )
 
-// ChannelConfig holds configuration for a single channel
-type ChannelConfig struct {
-	Type   string          `json:"type"`
-	Config json.RawMessage `json:"config,omitempty"`
-}
-
-// RouteConfig holds a single routing rule
-type RouteConfig struct {
-	Condition string `json:"condition"`
-	Channel   string `json:"channel"`
-}
-
-// ServerConfig holds server-specific configuration
-type ServerConfig struct {
-	Listen    string `json:"listen,omitempty"`
-	Unix      string `json:"unix,omitempty"`
-	Token     string `json:"token,omitempty"`
-	TokenFile string `json:"token_file,omitempty"`
-}
-
-// RemoteEndpoint defines a single remote connection endpoint
-type RemoteEndpoint struct {
-	Name     string `json:"name"`             // Unique identifier (e.g., "laptop-work")
-	Type     string `json:"type"`             // "outbound" (we connect) or "inbound" (they connect)
-	Host     string `json:"host,omitempty"`   // For outbound: "server:8787"
-	Socket   string `json:"socket,omitempty"` // For inbound: watch this socket path
-	Token    string `json:"token,omitempty"`  // Auth token for outbound connections
-	Priority int    `json:"priority"`         // Routing priority (lower = higher priority)
-}
-
-// Config holds the full application configuration
-type Config struct {
-	Server   ServerConfig             `json:"server"`   // Local server settings
-	Remotes  []RemoteEndpoint         `json:"remotes"`  // Multiple remote endpoints
-	Channels map[string]ChannelConfig `json:"channels"` // Channel definitions
-	Routes   []RouteConfig            `json:"routes"`   // Routing rules
-}
-
 func main() {
-	var cfg Config
-	var configFile string
-	var ntfyTopic string
-	var showVersion bool
+	// Create loader first so we can bind flags to viper
+	loader := config.NewLoader()
+	v := loader.GetViper()
 
-	flag.StringVar(&cfg.Server.Listen, "listen", "127.0.0.1:8787", "TCP listen address")
-	flag.StringVar(&cfg.Server.Unix, "unix", "", "Unix socket path instead of TCP")
-	flag.StringVar(&cfg.Server.Token, "token", os.Getenv("NOTIFY_RELAY_TOKEN"), "Bearer token for API authentication")
-	flag.StringVar(&cfg.Server.TokenFile, "token-file", "", "File containing bearer token")
-	flag.StringVar(&configFile, "config", "", "Configuration file (JSON). Default: ~/.config/notify-relay.conf")
-	flag.StringVar(&ntfyTopic, "ntfy-topic", os.Getenv("NOTIFY_RELAY_NTFY_TOPIC"), "ntfy.sh topic for phone notifications when screen is locked")
-	flag.BoolVar(&showVersion, "version", false, "Show version information")
-	flag.Parse()
+	// Define pflags
+	pflag.String("listen", "127.0.0.1:8787", "TCP listen address")
+	pflag.String("unix", "", "Unix socket path instead of TCP")
+	pflag.String("token", "", "Bearer token for API authentication")
+	pflag.String("token-file", "", "File containing bearer token")
+	pflag.String("config", "", "Configuration file (JSONC). Default: ~/.config/notify-relay.jsonc")
+	pflag.String("ntfy-topic", "", "ntfy.sh topic for phone notifications when screen is locked")
+	pflag.Bool("version", false, "Show version information")
 
-	if showVersion {
+	// Bind pflags to viper using BindPFlag
+	v.BindPFlag("server.listen", pflag.Lookup("listen"))
+	v.BindPFlag("server.unix", pflag.Lookup("unix"))
+	v.BindPFlag("server.token", pflag.Lookup("token"))
+	v.BindPFlag("server.token_file", pflag.Lookup("token-file"))
+	v.BindPFlag("config", pflag.Lookup("config"))
+	v.BindPFlag("ntfy_topic", pflag.Lookup("ntfy-topic"))
+	v.BindPFlag("version", pflag.Lookup("version"))
+
+	// Parse pflags
+	pflag.Parse()
+
+	// Handle version flag
+	if v.GetBool("version") {
 		fmt.Println(buildinfo.String("notify-relayd"))
 		return
 	}
 
-	// Load config file: explicit flag takes precedence over default path
-	if configFile == "" {
-		configFile = defaultConfigPath()
+	// Load configuration
+	var cfg config.Config
+	if err := loader.Load(&cfg); err != nil {
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
-	if configFile != "" {
-		if err := loadConfig(configFile, &cfg); err != nil {
-			if !os.IsNotExist(err) {
-				slog.Error("load config failed", "error", err)
-				os.Exit(1)
-			}
-			// Config file doesn't exist, that's ok - we'll use defaults
-		} else {
-			slog.Info("loaded config", "file", configFile)
-		}
+	if cfg.ConfigFile != "" {
+		slog.Info("loaded config", "file", cfg.ConfigFile)
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Run unified daemon
-	run(cfg, ntfyTopic)
+	run(cfg)
 }
 
-func run(cfg Config, ntfyTopic string) {
+func run(cfg config.Config) {
 	slog.Info("starting notify-relayd", "mode", "unified")
 
 	// Prepare token
@@ -123,50 +98,20 @@ func run(cfg Config, ntfyTopic string) {
 	}
 
 	// Create channels
-	channels, err := createChannels(cfg.Channels, ntfyTopic)
+	channels, err := createChannels(cfg.Channels, cfg.NtfyTopic)
 	if err != nil {
 		slog.Error("init channels failed", "error", err)
 		os.Exit(1)
 	}
 
 	// Build router configuration
-	routerCfg := router.Config{
-		Routes: make([]router.Route, len(cfg.Routes)),
-	}
-	for i, r := range cfg.Routes {
-		routerCfg.Routes[i] = router.Route{
-			Condition: r.Condition,
-			Channel:   r.Channel,
-		}
-	}
-
-	// Default routes if none specified
-	if len(routerCfg.Routes) == 0 {
-		if ntfyTopic != "" {
-			routerCfg.Routes = []router.Route{
-				{Condition: "screen_locked", Channel: "ntfy"},
-				{Condition: "always", Channel: "dbus"},
-			}
-		} else {
-			routerCfg.Routes = []router.Route{
-				{Condition: "remote_unlocked", Channel: "forward"},
-				{Condition: "screen_locked", Channel: "phone"},
-				{Condition: "always", Channel: "dbus"},
-			}
-		}
-	}
+	routerCfg := buildRouterConfig(cfg.Routes, cfg.NtfyTopic)
 
 	// Create remote manager
 	manager := remotes.NewManager()
 
-	// Start watchers for inbound remotes (sockets to watch and connect to)
-	var inboundSockets []string
-	for _, remote := range cfg.Remotes {
-		if remote.Type == "inbound" && remote.Socket != "" {
-			inboundSockets = append(inboundSockets, remote.Socket)
-		}
-	}
-
+	// Start watchers for inbound remotes
+	inboundSockets := cfg.GetInboundSockets()
 	if len(inboundSockets) > 0 {
 		outboundWatcher := remotes.NewOutboundWatcher(manager, inboundSockets, "", "server")
 		go func() {
@@ -179,12 +124,11 @@ func run(cfg Config, ntfyTopic string) {
 	}
 
 	// Start outbound remote connections
+	outboundRemotes := cfg.GetOutboundRemotes()
 	var outboundClients []*remotes.Client
-	for _, remote := range cfg.Remotes {
-		if remote.Type == "outbound" && remote.Host != "" {
-			client := startOutboundRemote(remote, lockDetector)
-			outboundClients = append(outboundClients, client)
-		}
+	for _, remote := range outboundRemotes {
+		client := startOutboundRemote(remote, lockDetector)
+		outboundClients = append(outboundClients, client)
 	}
 
 	// Create router with remote forwarding support
@@ -198,12 +142,7 @@ func run(cfg Config, ntfyTopic string) {
 	// Create gRPC server (if configured)
 	var grpcServer *server.GRPCServer
 	if cfg.Server.Listen != "" || cfg.Server.Unix != "" {
-		srvConfig := server.Config{
-			Listen: cfg.Server.Listen,
-			Unix:   cfg.Server.Unix,
-			Token:  cfg.Server.Token,
-		}
-		grpcServer, err = server.NewGRPCServer(srvConfig, r)
+		grpcServer, err = server.NewGRPCServer(cfg.Server, r)
 		if err != nil {
 			slog.Error("init grpc server failed", "error", err)
 			os.Exit(1)
@@ -263,7 +202,7 @@ func run(cfg Config, ntfyTopic string) {
 	}
 }
 
-func startOutboundRemote(remote RemoteEndpoint, lockDetector *lock.Detector) *remotes.Client {
+func startOutboundRemote(remote config.RemoteConfig, lockDetector *lock.Detector) *remotes.Client {
 	remoteClient := remotes.NewClient(remotes.ClientConfig{
 		ServerAddr: remote.Host,
 		Hostname:   remote.Name,
@@ -282,18 +221,29 @@ func startOutboundRemote(remote RemoteEndpoint, lockDetector *lock.Detector) *re
 	return remoteClient
 }
 
-func loadConfig(path string, cfg *Config) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
+func buildRouterConfig(routes []router.Route, ntfyTopic string) router.Config {
+	// Default routes if none specified
+	if len(routes) == 0 {
+		if ntfyTopic != "" {
+			routes = []router.Route{
+				{Condition: "screen_locked", Channel: "ntfy"},
+				{Condition: "always", Channel: "dbus"},
+			}
+		} else {
+			routes = []router.Route{
+				{Condition: "remote_unlocked", Channel: "forward"},
+				{Condition: "screen_locked", Channel: "phone"},
+				{Condition: "always", Channel: "dbus"},
+			}
+		}
 	}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return fmt.Errorf("parse config file: %w", err)
+
+	return router.Config{
+		Routes: routes,
 	}
-	return nil
 }
 
-func createChannels(configs map[string]ChannelConfig, ntfyTopic string) ([]channel.Channel, error) {
+func createChannels(configs map[string]config.ChannelConfig, ntfyTopic string) ([]channel.Channel, error) {
 	// If ntfy topic provided via CLI, create default channels with it
 	if ntfyTopic != "" {
 		return createChannelsWithNtfy(ntfyTopic)
@@ -357,7 +307,7 @@ func createChannelsWithNtfy(topic string) ([]channel.Channel, error) {
 	return []channel.Channel{dbusCh, ntfyCh}, nil
 }
 
-func prepareToken(cfg *ServerConfig) (bool, error) {
+func prepareToken(cfg *config.ServerConfig) (bool, error) {
 	if cfg.Token != "" {
 		return false, nil
 	}
@@ -401,12 +351,4 @@ func generateToken() (string, error) {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-func defaultConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "notify-relay.conf")
 }

@@ -19,10 +19,10 @@ import (
 )
 
 type Config struct {
-	Listen    string
-	Unix      string
-	Token     string
-	TokenFile string
+	Listen    string `mapstructure:"listen" json:"listen"`
+	Unix      string `mapstructure:"unix" json:"unix"`
+	Token     string `mapstructure:"token" json:"token"`
+	TokenFile string `mapstructure:"token_file" json:"token_file"`
 }
 
 type Server struct {

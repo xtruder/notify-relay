@@ -13,9 +13,9 @@ import (
 
 // Config holds ntfy channel configuration
 type Config struct {
-	Server string `json:"server"` // e.g., "https://ntfy.sh"
-	Topic  string `json:"topic"`  // e.g., "my-laptop-notifications"
-	Token  string `json:"token"`  // optional access token
+	Server string `mapstructure:"server" json:"server"`                   // e.g., "https://ntfy.sh"
+	Topic  string `mapstructure:"topic" json:"topic"`                     // e.g., "my-laptop-notifications"
+	Token  string `mapstructure:"token,omitempty" json:"token,omitempty"` // optional access token
 }
 
 // Channel implements channel.Channel for ntfy.sh notifications

@@ -15,14 +15,14 @@ import (
 
 // Route defines a routing rule: when condition matches, use this channel
 type Route struct {
-	Condition string `json:"condition"` // e.g., "screen_locked", "always", "remote_unlocked"
-	Channel   string `json:"channel"`   // channel name
+	Condition string `mapstructure:"condition" json:"condition"` // e.g., "screen_locked", "always", "remote_unlocked"
+	Channel   string `mapstructure:"channel" json:"channel"`     // channel name
 }
 
 // Config holds router configuration
 type Config struct {
-	Routes        []Route       `json:"routes"`
-	RemoteTimeout time.Duration `json:"remote_timeout,omitempty"` // Timeout for remote forwarding (default: 30s)
+	Routes        []Route       `mapstructure:"routes" json:"routes"`
+	RemoteTimeout time.Duration `mapstructure:"remote_timeout,omitempty" json:"remote_timeout,omitempty"` // Timeout for remote forwarding (default: 30s)
 }
 
 // Router routes notifications to appropriate channels based on conditions

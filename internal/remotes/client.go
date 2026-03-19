@@ -37,9 +37,9 @@ type Client struct {
 
 // ClientConfig holds configuration for the client
 type ClientConfig struct {
-	ServerAddr string
-	Hostname   string
-	Token      string
+	ServerAddr string `mapstructure:"server_addr" json:"server_addr"`
+	Hostname   string `mapstructure:"hostname" json:"hostname"`
+	Token      string `mapstructure:"token,omitempty" json:"token,omitempty"`
 	LockState  *lock.Detector
 }
 

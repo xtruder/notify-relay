@@ -1,0 +1,54 @@
+{
+  // Unified configuration supporting multiple remotes (inbound and outbound)
+  
+  "server": {
+    "listen": "127.0.0.1:8787",
+    "unix": "/run/user/1000/notify-relay.sock"
+  },
+  
+  // Remotes are a map (key = remote name), name field is auto-populated from key
+  "remotes": {
+    // Inbound remote: watch for forwarded socket from laptop
+    "laptop-work": {
+      "type": "inbound",
+      "socket": "/run/user/1000/notify-relay-laptop-work.sock",
+      "priority": 1
+    },
+    // Inbound remote: pattern matching for multiple laptops
+    "laptop-personal": {
+      "type": "inbound", 
+      "socket": "/run/user/1000/notify-relay-laptop-personal.sock",
+      "priority": 2
+    },
+    // Outbound remote: connect to another server
+    "backup-server": {
+      "type": "outbound",
+      "host": "backup.example.com:8787",
+      "token": "auth-token",
+      "priority": 3
+    }
+  },
+  
+  "channels": {
+    "dbus": {
+      "type": "dbus"
+    },
+    "phone": {
+      "type": "ntfy",
+      "config": {
+        "server": "https://ntfy.sh",
+        "topic": "my-notifications"
+      }
+    }
+  },
+  
+  // Routes are an array - order matters! First match wins.
+  "routes": [
+    // Forward to unlocked remote first
+    { "condition": "remote_unlocked", "channel": "forward" },
+    // Send to phone when screen locked
+    { "condition": "screen_locked", "channel": "phone" },
+    // Always route to dbus as fallback
+    { "condition": "always", "channel": "dbus" }
+  ]
+}

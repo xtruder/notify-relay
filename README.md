@@ -49,23 +49,49 @@ notify-relayd
 notify-relayd --ntfy-topic my-phone
 
 # Full distributed setup with config
-notify-relayd --config ~/.config/notify-relay.conf
+notify-relayd --config ~/.config/notify-relay.jsonc
 ```
 
 ## Configuration
 
-Default config location: `~/.config/notify-relay.conf`
+Configuration is loaded using [viper](https://github.com/spf13/viper) with support for:
+- **Config files**: JSONC (JSON with comments)
+- **Environment variables**: `NOTIFY_RELAY_*` prefix
+- **Command-line flags**: Override all other sources
+
+Configuration hierarchy (higher = higher priority):
+1. CLI flags
+2. Environment variables
+3. Config file
+4. Defaults
+
+Default config location: `~/.config/notify-relay.jsonc`
+
+### JSONC Support
+
+Config files support JSONC format which allows comments (`//` and `/* */`) in your configuration:
+
+```jsonc
+{
+  // This is a comment
+  "server": {
+    "listen": "127.0.0.1:8787"
+  }
+}
+```
 
 ### Minimal Example (local only)
 
-```json
+```jsonc
 {
+  // Unix socket for local communication
   "server": {
     "unix": "/run/user/1000/notify-relay.sock"
   },
   "channels": {
     "dbus": { "type": "dbus" }
   },
+  // Routes are an array - order matters! First match wins.
   "routes": [
     { "condition": "always", "channel": "dbus" }
   ]
@@ -76,8 +102,9 @@ Default config location: `~/.config/notify-relay.conf`
 
 Accepts connections from laptops via forwarded sockets:
 
-```json
+```jsonc
 {
+  // Server configuration
   "server": {
     "listen": "0.0.0.0:8787",
     "token": "secret-token"
@@ -90,24 +117,25 @@ Accepts connections from laptops via forwarded sockets:
     }
   },
   "routes": [
+    // Order matters! First match wins.
     { "condition": "remote_unlocked", "channel": "forward" },
     { "condition": "screen_locked", "channel": "phone" },
+    // Always route should be last as a fallback
     { "condition": "always", "channel": "dbus" }
   ],
-  "remotes": [
-    {
-      "name": "laptop-work",
+  // Remotes are now a map (key = remote name, name field auto-populated)
+  "remotes": {
+    "laptop-work": {
       "type": "inbound",
       "socket": "/run/user/1000/notify-relay-laptop-work.sock",
       "priority": 1
     },
-    {
-      "name": "laptop-personal",
+    "laptop-personal": {
       "type": "inbound",
       "socket": "/run/user/1000/notify-relay-laptop-personal.sock",
       "priority": 2
     }
-  ]
+  }
 }
 ```
 
@@ -115,7 +143,7 @@ Accepts connections from laptops via forwarded sockets:
 
 Connects to a server:
 
-```json
+```jsonc
 {
   "server": {
     "unix": "/run/user/1000/notify-relay.sock"
@@ -131,14 +159,13 @@ Connects to a server:
     { "condition": "screen_locked", "channel": "phone" },
     { "condition": "always", "channel": "dbus" }
   ],
-  "remotes": [
-    {
-      "name": "office-server",
+  "remotes": {
+    "office-server": {
       "type": "outbound",
       "host": "office.example.com:8787",
       "token": "secret-token"
     }
-  ]
+  }
 }
 ```
 
@@ -146,28 +173,26 @@ Connects to a server:
 
 Machine that connects to multiple servers AND accepts connections:
 
-```json
+```jsonc
 {
   "server": {
     "listen": "0.0.0.0:8787",
     "token": "hub-token"
   },
-  "remotes": [
-    {
-      "name": "office-server",
+  "remotes": {
+    "office-server": {
       "type": "outbound",
       "host": "office.internal:8787",
       "token": "office-token",
       "priority": 1
     },
-    {
-      "name": "home-server",
+    "home-server": {
       "type": "outbound",
       "host": "home.local:8787",
       "token": "home-token",
       "priority": 2
     }
-  ],
+  },
   "channels": {
     "dbus": { "type": "dbus" }
   },
@@ -182,18 +207,32 @@ Machine that connects to multiple servers AND accepts connections:
 
 ### Server Settings (`server`)
 
+| Field | Description | Environment Variable |
+|-------|-------------|---------------------|
+| `listen` | TCP address to listen on (e.g., `0.0.0.0:8787`) | `NOTIFY_RELAY_SERVER_LISTEN` |
+| `unix` | Unix socket path (e.g., `/run/user/1000/notify-relay.sock`) | `NOTIFY_RELAY_SERVER_UNIX` |
+| `token` | Bearer token for authentication | `NOTIFY_RELAY_SERVER_TOKEN` |
+| `token_file` | Path to file containing bearer token | `NOTIFY_RELAY_SERVER_TOKEN_FILE` |
+
+### Remotes (`remotes{}`)
+
+Remotes are defined as a map where the key is the remote name. The `name` field is automatically populated from the map key and doesn't need to be specified:
+
+```jsonc
+{
+  "remotes": {
+    "remote-name": {
+      "type": "outbound",
+      "host": "server:8787",
+      "token": "secret",
+      "priority": 1
+    }
+  }
+}
+```
+
 | Field | Description |
 |-------|-------------|
-| `listen` | TCP address to listen on (e.g., `0.0.0.0:8787`) |
-| `unix` | Unix socket path (e.g., `/run/user/1000/notify-relay.sock`) |
-| `token` | Bearer token for authentication |
-| `token_file` | Path to file containing bearer token |
-
-### Remotes (`remotes[]`)
-
-| Field | Description |
-|-------|-------------|
-| `name` | Unique identifier for this remote |
 | `type` | `"inbound"` (accept connections) or `"outbound"` (connect to) |
 | `socket` | For inbound: path to watch for forwarded sockets |
 | `host` | For outbound: server address (e.g., `server:8787`) |
@@ -209,6 +248,29 @@ Machine that connects to multiple servers AND accepts connections:
 
 ### Routes (`routes[]`)
 
+Routes are defined as an **array** where order matters - the first matching route wins. This ensures predictable routing behavior.
+
+```jsonc
+{
+  "routes": [
+    // Check if any remote is unlocked - forward to it
+    { "condition": "remote_unlocked", "channel": "forward" },
+    // If screen is locked, send to phone
+    { "condition": "screen_locked", "channel": "phone" },
+    // Always route should be last as the fallback
+    { "condition": "always", "channel": "dbus" }
+  ]
+}
+```
+
+**Via Environment Variable:**
+
+You can set routes via env var using a JSON array string:
+
+```bash
+NOTIFY_RELAY_ROUTES='[{"condition":"remote_unlocked","channel":"forward"},{"condition":"screen_locked","channel":"phone"},{"condition":"always","channel":"dbus"}]'
+```
+
 | Condition | Description |
 |-----------|-------------|
 | `always` | Always matches (use as fallback) |
@@ -223,17 +285,57 @@ Machine that connects to multiple servers AND accepts connections:
 --unix string          Unix socket path
 --token string         Bearer token for authentication
 --token-file string    File containing bearer token
---config string        Configuration file (default: ~/.config/notify-relay.conf)
+--config string        Configuration file (default: ~/.config/notify-relay.jsonc)
 --ntfy-topic string    ntfy.sh topic (enables phone notifications)
 --version              Show version
 ```
 
 ## Environment Variables
 
+All configuration options can be set via environment variables with the `NOTIFY_RELAY_` prefix. Viper automatically converts config keys to environment variable names:
+
+```bash
+# Server settings
+NOTIFY_RELAY_SERVER_LISTEN=0.0.0.0:8787
+NOTIFY_RELAY_SERVER_UNIX=/run/user/1000/notify-relay.sock
+NOTIFY_RELAY_SERVER_TOKEN=secret-token
+NOTIFY_RELAY_SERVER_TOKEN_FILE=/etc/notify-relay/token
+
+# Channel settings (for simple channels)
+NOTIFY_RELAY_CHANNELS_DBUS_TYPE=dbus
+NOTIFY_RELAY_CHANNELS_PHONE_TYPE=ntfy
+NOTIFY_RELAY_CHANNELS_PHONE_CONFIG_TOPIC=my-alerts
+
+# Config file path
+NOTIFY_RELAY_CONFIG=/etc/notify-relay/config.jsonc
+
+# CLI-only options
+NOTIFY_RELAY_NTFY_TOPIC=my-phone-alerts
+
+# Arrays via JSON strings (for routes and remotes)
+NOTIFY_RELAY_ROUTES='[{"condition":"remote_unlocked","channel":"forward"},{"condition":"always","channel":"dbus"}]'
+NOTIFY_RELAY_REMOTES='[{"name":"office","type":"outbound","host":"server:8787","token":"secret"}]'
 ```
-NOTIFY_RELAY_TOKEN          Server token
-NOTIFY_RELAY_SOCKET         Unix socket path
-NOTIFY_RELAY_NTFY_TOPIC     Default ntfy topic
+
+**JSON Arrays in Environment Variables:**
+
+For ordered arrays like `routes[]`, you can provide a JSON array string:
+
+```bash
+NOTIFY_RELAY_ROUTES='[
+  {"condition": "remote_unlocked", "channel": "forward"},
+  {"condition": "screen_locked", "channel": "phone"},
+  {"condition": "always", "channel": "dbus"}
+]'
+```
+
+For maps like `remotes{}`, you can also use a JSON array - it will be converted to a map internally:
+
+```bash
+NOTIFY_RELAY_REMOTES='[
+  {"name": "office", "type": "outbound", "host": "office.example.com:8787", "token": "secret"},
+  {"name": "backup", "type": "outbound", "host": "backup.local:8787"}
+]'
 ```
 
 ## Usage Examples
@@ -258,21 +360,20 @@ notify-relayd --listen 0.0.0.0:8787 --token my-secret
 **Laptop (via SSH tunnel):**
 ```bash
 ssh -L 8787:localhost:8787 office-desktop &
-notify-relayd --config laptop.json
+notify-relayd --config laptop.jsonc
 ```
 
-Where `laptop.json`:
-```json
+Where `laptop.jsonc`:
+```jsonc
 {
   "server": { "unix": "/run/user/1000/notify-relay.sock" },
-  "remotes": [
-    {
-      "name": "office",
+  "remotes": {
+    "office": {
       "type": "outbound",
       "host": "localhost:8787",
       "token": "my-secret"
     }
-  ]
+  }
 }
 ```
 
@@ -297,17 +398,16 @@ Host laptop
 ```
 
 **Server config:**
-```json
+```jsonc
 {
   "server": { "listen": "0.0.0.0:8787" },
-  "remotes": [
-    {
-      "name": "laptop",
+  "remotes": {
+    "laptop": {
       "type": "inbound",
       "socket": "/run/user/1000/notify-relay-laptop.sock",
       "priority": 1
     }
-  ]
+  }
 }
 ```
 
