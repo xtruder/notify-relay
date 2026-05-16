@@ -2,37 +2,37 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/xtruder/notify-relay/internal/channel"
 	"github.com/xtruder/notify-relay/internal/condition"
-	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
+	"github.com/xtruder/notify-relay/internal/p2p"
 	"github.com/xtruder/notify-relay/internal/protocol"
-	"github.com/xtruder/notify-relay/internal/remotes"
 )
+
+// ErrNoMatchingRoute is returned when no route condition matched.
+var ErrNoMatchingRoute = errors.New("no matching route found")
 
 // Route defines a routing rule: when condition matches, use this channel
 type Route struct {
-	Condition string `mapstructure:"condition" json:"condition"` // e.g., "screen_locked", "always", "remote_unlocked"
-	Channel   string `mapstructure:"channel" json:"channel"`     // channel name
+	Condition string `toml:"condition" json:"condition"` // e.g., "best_active", "no_better_peer", "always"
+	Channel   string `toml:"channel" json:"channel"`     // channel name
 }
 
 // Config holds router configuration
 type Config struct {
-	Routes        []Route       `mapstructure:"routes" json:"routes"`
-	RemoteTimeout time.Duration `mapstructure:"remote_timeout,omitempty" json:"remote_timeout,omitempty"` // Timeout for remote forwarding (default: 30s)
+	Routes []Route `toml:"routes" json:"routes"`
 }
 
 // Router routes notifications to appropriate channels based on conditions
 type Router struct {
-	config        Config
-	channels      map[string]channel.Channel
-	conditions    map[string]condition.Condition
-	manager       *remotes.Manager
-	mu            sync.RWMutex
-	remoteTimeout time.Duration
+	config     Config
+	channels   map[string]channel.Channel
+	conditions map[string]condition.Condition
+	mu         sync.RWMutex
 }
 
 // New creates a new router with the given configuration, evaluator, and channels
@@ -43,19 +43,10 @@ func New(cfg Config, evaluator condition.Evaluator, channels []channel.Channel) 
 		conditions: make(map[string]condition.Condition),
 	}
 
-	// Set default remote timeout if not specified
-	if cfg.RemoteTimeout > 0 {
-		r.remoteTimeout = cfg.RemoteTimeout
-	} else {
-		r.remoteTimeout = 30 * time.Second
-	}
-
-	// Store channels by name
 	for _, ch := range channels {
 		r.channels[ch.Name()] = ch
 	}
 
-	// Register conditions
 	r.conditions[condition.Always{}.Name()] = condition.Always{}
 	if evaluator != nil {
 		r.conditions[condition.NewScreenLocked(evaluator).Name()] = condition.NewScreenLocked(evaluator)
@@ -64,45 +55,36 @@ func New(cfg Config, evaluator condition.Evaluator, channels []channel.Channel) 
 	return r, nil
 }
 
-// NewWithRemotes creates a router with remote client forwarding support
-func NewWithRemotes(cfg Config, evaluator condition.Evaluator, channels []channel.Channel, manager *remotes.Manager) (*Router, error) {
+// NewWithP2P creates a router with p2p peer-aware conditions
+func NewWithP2P(cfg Config, evaluator condition.Evaluator, channels []channel.Channel, table *p2p.PeerTable) (*Router, error) {
 	r := &Router{
 		config:     cfg,
 		channels:   make(map[string]channel.Channel, len(channels)),
 		conditions: make(map[string]condition.Condition),
-		manager:    manager,
 	}
 
-	// Set default remote timeout if not specified
-	if cfg.RemoteTimeout > 0 {
-		r.remoteTimeout = cfg.RemoteTimeout
-	} else {
-		r.remoteTimeout = 30 * time.Second
-	}
-
-	// Store channels by name
 	for _, ch := range channels {
 		r.channels[ch.Name()] = ch
 	}
 
-	// Register conditions
 	r.conditions[condition.Always{}.Name()] = condition.Always{}
 	if evaluator != nil {
 		r.conditions[condition.NewScreenLocked(evaluator).Name()] = condition.NewScreenLocked(evaluator)
 	}
 
-	// Register remote conditions if manager is available
-	if manager != nil {
-		r.conditions["remote_available"] = &RemoteAvailableCondition{manager: manager}
-		r.conditions["remote_unlocked"] = &RemoteUnlockedCondition{manager: manager}
+	if table != nil {
+		r.conditions["remote_available"] = &RemoteAvailableCondition{table: table}
+		r.conditions["remote_present"] = &RemotePresentCondition{table: table}
+		r.conditions["best_active"] = &BestActiveCondition{table: table}
+		r.conditions["no_better_peer"] = &NoBetterPeerCondition{table: table}
 	}
 
 	return r, nil
 }
 
-// RemoteAvailableCondition checks if any remote is connected
+// RemoteAvailableCondition checks if any remote peer is connected
 type RemoteAvailableCondition struct {
-	manager *remotes.Manager
+	table *p2p.PeerTable
 }
 
 func (r *RemoteAvailableCondition) Name() string {
@@ -110,33 +92,62 @@ func (r *RemoteAvailableCondition) Name() string {
 }
 
 func (r *RemoteAvailableCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
-	return r.manager.HasConnectedRemote()
+	return r.table.HasConnectedPeer(p2p.StaleTimeout)
 }
 
-// RemoteUnlockedCondition checks if any remote is unlocked
-type RemoteUnlockedCondition struct {
-	manager *remotes.Manager
+// RemotePresentCondition checks if any remote peer is present (can handle notifications).
+type RemotePresentCondition struct {
+	table *p2p.PeerTable
 }
 
-func (r *RemoteUnlockedCondition) Name() string {
-	return "remote_unlocked"
+func (r *RemotePresentCondition) Name() string {
+	return "remote_present"
 }
 
-func (r *RemoteUnlockedCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
-	return r.manager.HasUnlockedRemote()
+func (r *RemotePresentCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+	return r.table.HasPresentPeer(p2p.StaleTimeout)
 }
 
-// Notify routes a notification to the appropriate channel
-// For remote forwarding routes, it will wait for the remote response with timeout
-// If remote forwarding fails or times out, it falls back to the next matching route
+// BestActiveCondition returns true if the local node is the best (lowest priority)
+// present node among all known nodes. Use this on desktop/laptop nodes to display
+// notifications only when this node should be the primary handler.
+type BestActiveCondition struct {
+	table *p2p.PeerTable
+}
+
+func (b *BestActiveCondition) Name() string {
+	return "best_active"
+}
+
+func (b *BestActiveCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+	return b.table.IsBestActive(p2p.StaleTimeout)
+}
+
+// NoBetterPeerCondition returns true when no present node exists anywhere
+// and the local node has the highest priority number (worst priority = last resort).
+// Use this on always-on nodes (VPS) to forward to ntfy.sh as a fallback.
+type NoBetterPeerCondition struct {
+	table *p2p.PeerTable
+}
+
+func (n *NoBetterPeerCondition) Name() string {
+	return "no_better_peer"
+}
+
+func (n *NoBetterPeerCondition) Evaluate(ctx context.Context, req protocol.NotifyRequest) bool {
+	return n.table.IsNoBetterPeer(p2p.StaleTimeout)
+}
+
+// Notify routes a notification to the appropriate channel.
+// Routes are evaluated in order — first match wins.
 func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Evaluate routes in order, send to first matching channel
-	for i, route := range r.config.Routes {
+	for _, route := range r.config.Routes {
 		cond, ok := r.conditions[route.Condition]
 		if !ok {
+			slog.Debug("unknown condition", "condition", route.Condition)
 			continue
 		}
 
@@ -146,66 +157,19 @@ func (r *Router) Notify(ctx context.Context, req protocol.NotifyRequest) (protoc
 
 		ch, ok := r.channels[route.Channel]
 		if !ok {
-			// Special case: "forward" channel means forward to remote
-			if route.Channel == "forward" && r.manager != nil {
-				resp, forwarded := r.tryForwardToRemote(ctx, req, i)
-				if forwarded {
-					return resp, nil
-				}
-				// Forwarding failed or timed out, continue to next route (fallback)
-				continue
-			}
+			slog.Debug("unknown channel in route", "channel", route.Channel)
 			continue
 		}
 
-		return ch.Send(ctx, req)
+		resp, err := ch.Send(ctx, req)
+		if err != nil && errors.Is(err, channel.ErrUnavailable) {
+			slog.Warn("channel unavailable, trying next route", "channel", route.Channel)
+			continue
+		}
+		return resp, err
 	}
 
-	return protocol.NotifyResponse{}, fmt.Errorf("no matching route found")
-}
-
-// tryForwardToRemote attempts to forward notification to best remote
-// Returns (response, true) if successful, (zero, false) if failed/timeout
-func (r *Router) tryForwardToRemote(ctx context.Context, req protocol.NotifyRequest, routeIndex int) (protocol.NotifyResponse, bool) {
-	remote := r.manager.FindBestRemote()
-	if remote == nil {
-		return protocol.NotifyResponse{}, false
-	}
-
-	// Create forwarded notification
-	forwarded := &notify_relayv1.ForwardedNotification{
-		SourceHostname: "server",
-		Notification: &notify_relayv1.Notification{
-			AppName:       req.AppName,
-			Summary:       req.Summary,
-			Body:          req.Body,
-			AppIcon:       req.AppIcon,
-			ExpireTimeout: req.ExpireTimeout,
-			Hints:         make(map[string]string),
-		},
-	}
-
-	// Add hints
-	for _, hint := range req.Hints {
-		forwarded.Notification.Hints[hint.Name] = hint.Value
-	}
-
-	// Forward with timeout
-	forwardCtx, cancel := context.WithTimeout(ctx, r.remoteTimeout)
-	defer cancel()
-
-	resp, err := r.manager.ForwardNotification(forwardCtx, remote.Hostname, forwarded)
-	if err != nil {
-		return protocol.NotifyResponse{}, false
-	}
-
-	// Response received successfully
-	return protocol.NotifyResponse{
-		ID:        resp.Id,
-		Event:     resp.Event,
-		Reason:    resp.Reason,
-		ActionKey: resp.ActionKey,
-	}, true
+	return protocol.NotifyResponse{}, ErrNoMatchingRoute
 }
 
 // CloseNotification closes a notification on all channels that support it
@@ -230,7 +194,6 @@ func (r *Router) Capabilities(ctx context.Context) ([]string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Use the last channel (should be the fallback "always" route)
 	for i := len(r.config.Routes) - 1; i >= 0; i-- {
 		route := r.config.Routes[i]
 		if ch, ok := r.channels[route.Channel]; ok {
@@ -246,7 +209,6 @@ func (r *Router) ServerInformation(ctx context.Context) (protocol.ServerInfoResp
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Use the last channel (should be the fallback "always" route)
 	for i := len(r.config.Routes) - 1; i >= 0; i-- {
 		route := r.config.Routes[i]
 		if ch, ok := r.channels[route.Channel]; ok {
@@ -255,19 +217,4 @@ func (r *Router) ServerInformation(ctx context.Context) (protocol.ServerInfoResp
 	}
 
 	return protocol.ServerInfoResponse{}, fmt.Errorf("no channels available")
-}
-
-// Close closes all channels
-func (r *Router) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	var lastErr error
-	for _, ch := range r.channels {
-		if err := ch.Close(); err != nil {
-			lastErr = err
-		}
-	}
-
-	return lastErr
 }

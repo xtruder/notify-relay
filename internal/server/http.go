@@ -19,10 +19,10 @@ import (
 )
 
 type Config struct {
-	Listen    string `mapstructure:"listen" json:"listen"`
-	Unix      string `mapstructure:"unix" json:"unix"`
-	Token     string `mapstructure:"token" json:"token"`
-	TokenFile string `mapstructure:"token_file" json:"token_file"`
+	Listen    string `toml:"listen,omitempty" json:"listen" comment:"TCP listen address for local gRPC API"`
+	Unix      string `toml:"unix,omitempty" json:"unix" comment:"Unix socket path for local gRPC API"`
+	Token     string `toml:"token,omitempty" json:"token"`
+	TokenFile string `toml:"token_file,omitempty" json:"token_file"`
 }
 
 type Server struct {

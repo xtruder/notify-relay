@@ -8,35 +8,42 @@ import (
 	"os"
 	"sync"
 
+	"github.com/xtruder/notify-relay/internal/p2p"
 	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
-	"github.com/xtruder/notify-relay/internal/remotes"
-	"github.com/xtruder/notify-relay/internal/router"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// GRPCServer implements the gRPC RelayService
+// NotificationRouter is the interface the gRPC server uses to route notifications.
+type NotificationRouter interface {
+	Notify(ctx context.Context, req protocol.NotifyRequest) (protocol.NotifyResponse, error)
+	CloseNotification(ctx context.Context, id uint32) error
+	Capabilities(ctx context.Context) ([]string, error)
+	ServerInformation(ctx context.Context) (protocol.ServerInfoResponse, error)
+}
+
+// GRPCServer implements the gRPC RelayService for the local proxy API.
 type GRPCServer struct {
 	notify_relayv1.UnimplementedRelayServiceServer
 
-	router       *router.Router
-	manager      *remotes.Manager
-	remoteServer *remotes.Server
-	config       Config
-	grpcServer   *grpc.Server
-	listener     net.Listener
-	mu           sync.RWMutex
-	token        string
+	router     NotificationRouter
+	peerTable  *p2p.PeerTable
+	config     Config
+	grpcServer *grpc.Server
+	listener   net.Listener
+	mu         sync.RWMutex
 }
 
-// NewGRPCServer creates a new gRPC server
-func NewGRPCServer(cfg Config, r *router.Router) (*GRPCServer, error) {
+// NewGRPCServer creates a new gRPC server. peerTable may be nil if peer
+// listing should be unavailable.
+func NewGRPCServer(cfg Config, r NotificationRouter, peerTable *p2p.PeerTable) (*GRPCServer, error) {
 	s := &GRPCServer{
-		config: cfg,
-		router: r,
+		config:    cfg,
+		router:    r,
+		peerTable: peerTable,
 	}
 
 	// Setup interceptor for authentication
@@ -57,33 +64,22 @@ func NewGRPCServer(cfg Config, r *router.Router) (*GRPCServer, error) {
 			return nil, fmt.Errorf("listen on unix socket: %w", err)
 		}
 		s.listener = ln
-	} else {
+	} else if cfg.Listen != "" {
 		ln, err := net.Listen("tcp", cfg.Listen)
 		if err != nil {
 			return nil, fmt.Errorf("listen on %s: %w", cfg.Listen, err)
 		}
 		s.listener = ln
+	} else {
+		return nil, fmt.Errorf("no listen address or unix socket configured")
 	}
 
 	return s, nil
 }
 
-// SetRemoteManager sets the remote client manager (for server mode)
-func (s *GRPCServer) SetRemoteManager(m *remotes.Manager) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.manager = m
-	if m != nil {
-		s.remoteServer = remotes.NewServer(m)
-	}
-}
-
 // Serve starts the gRPC server
 func (s *GRPCServer) Serve() error {
 	slog.Info("notify-relayd gRPC listening", "address", s.listener.Addr())
-	if s.config.Token != "" {
-		slog.Info("notify-relayd bearer token configured")
-	}
 	return s.grpcServer.Serve(s.listener)
 }
 
@@ -99,7 +95,6 @@ func (s *GRPCServer) Address() string {
 func (s *GRPCServer) Shutdown(ctx context.Context) error {
 	s.grpcServer.GracefulStop()
 
-	// Clean up Unix socket file if applicable
 	if s.config.Unix != "" {
 		if err := os.Remove(s.config.Unix); err != nil && !os.IsNotExist(err) {
 			slog.Warn("failed to remove socket file", "error", err)
@@ -110,12 +105,9 @@ func (s *GRPCServer) Shutdown(ctx context.Context) error {
 }
 
 // Notify handles incoming notification requests from proxy
-// The router handles all routing logic including remote forwarding and fallback
 func (s *GRPCServer) Notify(ctx context.Context, req *notify_relayv1.Notification) (*notify_relayv1.NotificationResponse, error) {
-	// Convert proto to protocol request
 	protocolReq := protoToProtocol(req)
 
-	// Router handles everything including remote forwarding with timeout and fallback
 	resp, err := s.router.Notify(ctx, protocolReq)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "notify failed: %v", err)
@@ -161,17 +153,37 @@ func (s *GRPCServer) Health(ctx context.Context, req *notify_relayv1.HealthReque
 	return &notify_relayv1.HealthResponse{Status: "ok"}, nil
 }
 
-// Connect handles bidirectional streams from remote clients
+// Connect is no longer used for remote relay (p2p handles that).
+// Kept to satisfy the proto interface.
 func (s *GRPCServer) Connect(stream notify_relayv1.RelayService_ConnectServer) error {
-	s.mu.RLock()
-	remoteServer := s.remoteServer
-	s.mu.RUnlock()
+	return status.Errorf(codes.Unimplemented, "use p2p for remote relay")
+}
 
-	if remoteServer == nil {
-		return status.Errorf(codes.Unimplemented, "remote connections not enabled")
+// ListPeers returns the current p2p peer table snapshot.
+func (s *GRPCServer) ListPeers(ctx context.Context, req *notify_relayv1.ListPeersRequest) (*notify_relayv1.ListPeersResponse, error) {
+	if s.peerTable == nil {
+		return nil, status.Errorf(codes.Unavailable, "peer table not available")
 	}
 
-	return remoteServer.HandleConnect(stream)
+	resp := &notify_relayv1.ListPeersResponse{}
+	if local, ok := s.peerTable.GetLocal(); ok {
+		resp.Peers = append(resp.Peers, peerInfoToProto(local, true))
+	}
+	for _, p := range s.peerTable.GetAll() {
+		resp.Peers = append(resp.Peers, peerInfoToProto(p, false))
+	}
+	return resp, nil
+}
+
+func peerInfoToProto(info p2p.PeerInfo, isLocal bool) *notify_relayv1.Peer {
+	return &notify_relayv1.Peer{
+		PeerId:           info.PeerID.String(),
+		Hostname:         info.Hostname,
+		IsPresent:        info.IsPresent,
+		Priority:         int32(info.Priority),
+		LastSeenUnixNano: info.LastSeen.UnixNano(),
+		IsLocal:          isLocal,
+	}
 }
 
 // unaryAuthInterceptor checks authentication for unary calls
@@ -180,7 +192,6 @@ func (s *GRPCServer) unaryAuthInterceptor(ctx context.Context, req interface{}, 
 		return handler(ctx, req)
 	}
 
-	// Skip auth for health checks
 	if info.FullMethod == "/notify_relay.v1.RelayService/Health" {
 		return handler(ctx, req)
 	}
@@ -265,7 +276,6 @@ func protocolToProto(resp protocol.NotifyResponse) *notify_relayv1.NotificationR
 func hintsFromProto(hints map[string]string) []protocol.Hint {
 	result := make([]protocol.Hint, 0, len(hints))
 	for name, value := range hints {
-		// Default to string type for simplicity
 		result = append(result, protocol.Hint{
 			Name:  name,
 			Type:  "string",

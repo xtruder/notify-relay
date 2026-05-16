@@ -103,6 +103,24 @@ message RemoteClient {
   bool is_connected = 4;
 }
 
+// ListPeersRequest asks for the current peer table
+message ListPeersRequest {}
+
+// Peer describes a single entry in the peer table.
+message Peer {
+  string peer_id = 1;
+  string hostname = 2;
+  bool is_present = 3;
+  int32 priority = 4;
+  int64 last_seen_unix_nano = 5;
+  bool is_local = 6;
+}
+
+// ListPeersResponse returns the current peer table.
+message ListPeersResponse {
+  repeated Peer peers = 1;
+}
+
 // ============================================================================
 // Client/Server Stream Messages
 // ============================================================================
@@ -149,4 +167,7 @@ service RelayService {
   // Connect establishes a bidirectional stream for client-server communication
   // Used by client mode daemons to connect to server mode daemons
   rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+
+  // ListPeers returns the current p2p peer table snapshot.
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
 }

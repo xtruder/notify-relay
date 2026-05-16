@@ -72,7 +72,6 @@ func TestRouterBasicRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
-	defer r.Close()
 
 	req := protocol.NotifyRequest{
 		AppName: "test",
@@ -133,7 +132,6 @@ func TestRouterFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
-	defer r.Close()
 
 	req := protocol.NotifyRequest{
 		Summary: "Test",
@@ -163,7 +161,6 @@ func TestRouterAlwaysCondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
-	defer r.Close()
 
 	req := protocol.NotifyRequest{Summary: "Test", Body: "Body"}
 	_, err = r.Notify(ctx, req)
@@ -353,7 +350,6 @@ func TestRouterCapabilitiesAndServerInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
-	defer r.Close()
 
 	// Test Capabilities
 	caps, err := r.Capabilities(ctx)
@@ -394,7 +390,6 @@ func TestRouterCloseNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create router: %v", err)
 	}
-	defer r.Close()
 
 	// Send a notification first
 	req := protocol.NotifyRequest{Summary: "Test", Body: "Body"}

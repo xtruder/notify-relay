@@ -2,9 +2,15 @@ package channel
 
 import (
 	"context"
+	"errors"
 
 	"github.com/xtruder/notify-relay/internal/protocol"
 )
+
+// ErrUnavailable indicates a channel is temporarily or permanently unavailable.
+// When a Send returns this error, the router skips this channel and tries
+// the next matching route.
+var ErrUnavailable = errors.New("channel unavailable")
 
 // Channel defines the interface for notification delivery channels
 type Channel interface {

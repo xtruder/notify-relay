@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             (unknown)
-// source: proto/notify_relay/v1/relay.proto
+// source: notify_relay/v1/relay.proto
 
 package notify_relayv1
 
@@ -25,6 +25,7 @@ const (
 	RelayService_GetServerInfo_FullMethodName     = "/notify_relay.v1.RelayService/GetServerInfo"
 	RelayService_Health_FullMethodName            = "/notify_relay.v1.RelayService/Health"
 	RelayService_Connect_FullMethodName           = "/notify_relay.v1.RelayService/Connect"
+	RelayService_ListPeers_FullMethodName         = "/notify_relay.v1.RelayService/ListPeers"
 )
 
 // RelayServiceClient is the client API for RelayService service.
@@ -46,6 +47,8 @@ type RelayServiceClient interface {
 	// Connect establishes a bidirectional stream for client-server communication
 	// Used by client mode daemons to connect to server mode daemons
 	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error)
+	// ListPeers returns the current p2p peer table snapshot.
+	ListPeers(ctx context.Context, in *ListPeersRequest, opts ...grpc.CallOption) (*ListPeersResponse, error)
 }
 
 type relayServiceClient struct {
@@ -119,6 +122,16 @@ func (c *relayServiceClient) Connect(ctx context.Context, opts ...grpc.CallOptio
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RelayService_ConnectClient = grpc.BidiStreamingClient[ClientMessage, ServerMessage]
 
+func (c *relayServiceClient) ListPeers(ctx context.Context, in *ListPeersRequest, opts ...grpc.CallOption) (*ListPeersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPeersResponse)
+	err := c.cc.Invoke(ctx, RelayService_ListPeers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RelayServiceServer is the server API for RelayService service.
 // All implementations must embed UnimplementedRelayServiceServer
 // for forward compatibility.
@@ -138,6 +151,8 @@ type RelayServiceServer interface {
 	// Connect establishes a bidirectional stream for client-server communication
 	// Used by client mode daemons to connect to server mode daemons
 	Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error
+	// ListPeers returns the current p2p peer table snapshot.
+	ListPeers(context.Context, *ListPeersRequest) (*ListPeersResponse, error)
 	mustEmbedUnimplementedRelayServiceServer()
 }
 
@@ -165,6 +180,9 @@ func (UnimplementedRelayServiceServer) Health(context.Context, *HealthRequest) (
 }
 func (UnimplementedRelayServiceServer) Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedRelayServiceServer) ListPeers(context.Context, *ListPeersRequest) (*ListPeersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPeers not implemented")
 }
 func (UnimplementedRelayServiceServer) mustEmbedUnimplementedRelayServiceServer() {}
 func (UnimplementedRelayServiceServer) testEmbeddedByValue()                      {}
@@ -284,6 +302,24 @@ func _RelayService_Connect_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RelayService_ConnectServer = grpc.BidiStreamingServer[ClientMessage, ServerMessage]
 
+func _RelayService_ListPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPeersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RelayServiceServer).ListPeers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RelayService_ListPeers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RelayServiceServer).ListPeers(ctx, req.(*ListPeersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RelayService_ServiceDesc is the grpc.ServiceDesc for RelayService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -311,6 +347,10 @@ var RelayService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Health",
 			Handler:    _RelayService_Health_Handler,
 		},
+		{
+			MethodName: "ListPeers",
+			Handler:    _RelayService_ListPeers_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -320,5 +360,5 @@ var RelayService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/notify_relay/v1/relay.proto",
+	Metadata: "notify_relay/v1/relay.proto",
 }
