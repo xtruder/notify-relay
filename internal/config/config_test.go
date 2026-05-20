@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -42,14 +43,21 @@ func TestWriteAndLoadConfig(t *testing.T) {
 	if len(cfg.Channels) != 1 {
 		t.Errorf("channels count = %d, want 1", len(cfg.Channels))
 	}
-	if ch, ok := cfg.Channels["dbus"]; !ok || ch.Type != "dbus" {
-		t.Error("expected dbus channel")
+	expectedChannel := "dbus"
+	if runtime.GOOS == "darwin" {
+		expectedChannel = "macos"
+	}
+	if ch, ok := cfg.Channels[expectedChannel]; !ok || ch.Type != expectedChannel {
+		t.Errorf("expected %s channel", expectedChannel)
 	}
 	if len(cfg.Routes) != 1 {
 		t.Errorf("routes count = %d, want 1", len(cfg.Routes))
 	}
 	if cfg.Routes[0].Condition != "best_active" {
 		t.Errorf("route condition = %q, want 'best_active'", cfg.Routes[0].Condition)
+	}
+	if cfg.Routes[0].Channel != expectedChannel {
+		t.Errorf("route channel = %q, want %q", cfg.Routes[0].Channel, expectedChannel)
 	}
 
 	// Validate

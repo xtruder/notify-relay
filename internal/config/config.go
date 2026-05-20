@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -17,7 +18,7 @@ import (
 // ChannelConfig holds configuration for a single notification channel.
 // For ntfy channels, Server and Topic are used directly.
 type ChannelConfig struct {
-	Type       string `toml:"type" comment:"Channel type: 'dbus' or 'ntfy'"`
+	Type       string `toml:"type" comment:"Channel type: 'dbus', 'macos' or 'ntfy'"`
 	Server     string `toml:"server,omitempty" comment:"ntfy server URL (ntfy channels only)"`
 	Topic      string `toml:"topic,omitempty" comment:"ntfy topic name (ntfy channels only)"`
 	Token      string `toml:"token,omitempty" comment:"ntfy access token (optional)"`
@@ -65,8 +66,8 @@ type Config struct {
 func (c *Config) Validate() error {
 	// Validate channels
 	for name, ch := range c.Channels {
-		if ch.Type != "dbus" && ch.Type != "ntfy" {
-			return fmt.Errorf("channel %s: invalid type %q (must be 'dbus' or 'ntfy')", name, ch.Type)
+		if ch.Type != "dbus" && ch.Type != "macos" && ch.Type != "ntfy" {
+			return fmt.Errorf("channel %s: invalid type %q (must be 'dbus', 'macos' or 'ntfy')", name, ch.Type)
 		}
 	}
 
@@ -109,20 +110,25 @@ func (c *Config) SetNtfyTopic(topic string) {
 
 // DefaultConfig returns a Config with sensible defaults for the given channel ID.
 func DefaultConfig(channelID string) Config {
-	uid := os.Getuid()
+	chName := "dbus"
+	if runtime.GOOS == "darwin" {
+		chName = "macos"
+	}
+	home, _ := os.UserHomeDir()
+	unixPath := filepath.Join(home, ".local", "share", "notify-relay.sock")
 	return Config{
 		P2P: P2PConfig{
 			Channel:  channelID,
 			Priority: 1,
 		},
 		Server: ServerConfig{
-			Unix: fmt.Sprintf("/run/user/%d/notify-relay.sock", uid),
+			Unix: unixPath,
 		},
 		Channels: map[string]ChannelConfig{
-			"dbus": {Type: "dbus"},
+			chName: {Type: chName},
 		},
 		Routes: []Route{
-			{Condition: "best_active", Channel: "dbus"},
+			{Condition: "best_active", Channel: chName},
 		},
 	}
 }
