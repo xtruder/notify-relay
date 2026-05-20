@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 // PubSub wraps GossipSub with channel-level encryption.

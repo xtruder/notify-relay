@@ -30,8 +30,8 @@ type WebhookHandler struct {
 	mu      sync.Mutex
 	waiters map[string]*waiterEntry
 
-	http   *http.Server
-	ln     net.Listener
+	http *http.Server
+	ln   net.Listener
 }
 
 // ActionEvent represents an action triggered by the user via ntfy.

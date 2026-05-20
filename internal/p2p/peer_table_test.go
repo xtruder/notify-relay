@@ -26,10 +26,10 @@ func TestPeerTableBasic(t *testing.T) {
 	id := testPeerID(t)
 
 	pt.Update(PeerInfo{
-		PeerID:   id,
-		Hostname: "test",
+		PeerID:    id,
+		Hostname:  "test",
 		IsPresent: true,
-		Priority: 1,
+		Priority:  1,
 	})
 
 	info, ok := pt.Get(id)
