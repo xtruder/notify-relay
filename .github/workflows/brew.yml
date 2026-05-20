@@ -29,7 +29,6 @@ jobs:
       - name: Install formula from local tap
         run: brew install --build-from-source --HEAD xtruder/tap/notify-relay
 
-      - name: Verify binaries
+      - name: Verify binary
         run: |
-          notify-send-proxy --version
-          notify-relayd --version 2>&1 | grep 'notify-relayd version='
+          notify-relay --version 2>&1 | grep 'notify-relay version='

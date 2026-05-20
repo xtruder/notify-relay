@@ -43,8 +43,7 @@ jobs:
           mkdir -p "$work/packaging/systemd"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           LDFLAGS="-s -w -X github.com/xtruder/notify-relay/internal/buildinfo.Version=${VERSION} -X github.com/xtruder/notify-relay/internal/buildinfo.Commit=${COMMIT} -X github.com/xtruder/notify-relay/internal/buildinfo.Date=${DATE}"
-          go build -ldflags "$LDFLAGS" -o "$work/notify-relayd" ./cmd/notify-relayd
-          go build -ldflags "$LDFLAGS" -o "$work/notify-send-proxy" ./cmd/notify-send-proxy
+          go build -ldflags "$LDFLAGS" -o "$work/notify-relay" ./cmd/notify-relay
           cp packaging/systemd/notify-relayd.service "$work/packaging/systemd/notify-relayd.service"
           tar -C dist -czf "dist/${out}.tar.gz" "$out"
 

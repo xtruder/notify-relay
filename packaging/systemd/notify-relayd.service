@@ -5,8 +5,8 @@ Wants=graphical-session.target
 
 [Service]
 Type=simple
-EnvironmentFile=-%h/.config/notify-relay/notify-relayd.env
-ExecStart=%h/.local/bin/notify-relayd --unix %t/notify-relay.sock
+EnvironmentFile=-%h/.config/notify-relay/notify-relay.env
+ExecStart=%h/.local/bin/notify-relay serve --unix %t/notify-relay.sock
 Restart=on-failure
 RestartSec=2
 
