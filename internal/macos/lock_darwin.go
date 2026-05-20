@@ -13,6 +13,7 @@ import (
 
 /*
 #cgo LDFLAGS: -framework CoreGraphics
+#include <CoreGraphics/CoreGraphics.h>
 int macosIsScreenLocked() {
 	CFDictionaryRef dict = CGSessionCopyCurrentDictionary();
 	if (!dict) {
