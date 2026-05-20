@@ -14,6 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/multiformats/go-multiaddr"
 
@@ -81,6 +82,7 @@ func NewHost(ctx context.Context, cfg HostConfig) (host.Host, *dht.IpfsDHT, erro
 		libp2p.EnableRelay(),
 		libp2p.NATPortMap(),
 		libp2p.EnableHolePunching(),
+		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Transport(websocket.New),
 	}
 
