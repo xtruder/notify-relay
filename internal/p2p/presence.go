@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync/atomic"
@@ -11,6 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 )
 
 const (
@@ -20,20 +22,6 @@ const (
 	// StaleTimeout is how long before a peer is considered stale.
 	StaleTimeout = 30 * time.Second
 )
-
-// PresenceMessage is published on the presence topic.
-type PresenceMessage struct {
-	PeerID    string `json:"peer_id"`
-	Hostname  string `json:"hostname"`
-	IsPresent bool   `json:"is_present"`
-	Priority  int    `json:"priority"`
-	// Leaving signals that the sender is shutting down and should be
-	// removed from peer tables immediately, without waiting for the stale
-	// timeout. Always published with IsPresent=false.
-	Leaving bool `json:"leaving,omitempty"`
-	// Unix timestamp in milliseconds
-	Timestamp int64 `json:"timestamp"`
-}
 
 // PresenceService handles presence pub/sub communication.
 // It runs an internal heartbeat loop that re-broadcasts the last known
@@ -162,15 +150,15 @@ func (s *PresenceService) Run(ctx context.Context) error {
 // publishLeaving broadcasts a final presence update marked as Leaving so
 // peers can drop the local node without waiting for the stale timeout.
 func (s *PresenceService) publishLeaving(ctx context.Context) error {
-	msg := PresenceMessage{
-		PeerID:    s.host.ID().String(),
+	msg := &notify_relayv1.PresenceMessage{
+		PeerId:    s.host.ID().String(),
 		Hostname:  s.hostname,
 		IsPresent: false,
-		Priority:  s.priority,
+		Priority:  int32(s.priority),
 		Leaving:   true,
 		Timestamp: time.Now().UnixMilli(),
 	}
-	data, err := json.Marshal(msg)
+	data, err := protojson.Marshal(msg)
 	if err != nil {
 		return err
 	}
@@ -198,15 +186,15 @@ func (s *PresenceService) publish(ctx context.Context, isPresent bool) error {
 		Priority:  s.priority,
 	})
 
-	msg := PresenceMessage{
-		PeerID:    s.host.ID().String(),
+	msg := &notify_relayv1.PresenceMessage{
+		PeerId:    s.host.ID().String(),
 		Hostname:  s.hostname,
 		IsPresent: isPresent,
-		Priority:  s.priority,
+		Priority:  int32(s.priority),
 		Timestamp: time.Now().UnixMilli(),
 	}
 
-	data, err := json.Marshal(msg)
+	data, err := protojson.Marshal(msg)
 	if err != nil {
 		return err
 	}
@@ -255,13 +243,13 @@ func (s *PresenceService) handleSubscription(ctx context.Context, sub *Subscript
 			continue
 		}
 
-		var msg PresenceMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
+		msg := &notify_relayv1.PresenceMessage{}
+		if err := protojson.Unmarshal(data, msg); err != nil {
 			slog.Debug("invalid presence message", "from", from, "error", err)
 			continue
 		}
 
-		peerID, err := peer.Decode(msg.PeerID)
+		peerID, err := peer.Decode(msg.PeerId)
 		if err != nil {
 			continue
 		}
@@ -279,7 +267,7 @@ func (s *PresenceService) handleSubscription(ctx context.Context, sub *Subscript
 			PeerID:    peerID,
 			Hostname:  msg.Hostname,
 			IsPresent: msg.IsPresent,
-			Priority:  msg.Priority,
+			Priority:  int(msg.Priority),
 		})
 	}
 }

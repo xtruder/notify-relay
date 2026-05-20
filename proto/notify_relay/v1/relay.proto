@@ -8,6 +8,13 @@ option go_package = "github.com/xtruder/notify-relay/internal/proto/notify_relay
 // Types
 // ============================================================================
 
+// Hint represents a single hint key-value pair with type information.
+message Hint {
+  string name = 1;
+  string type = 2;
+  string value = 3;
+}
+
 // Notification represents a desktop notification
 message Notification {
   string app_name = 1;
@@ -16,7 +23,7 @@ message Notification {
   string summary = 4;
   string body = 5;
   repeated string actions = 6;
-  map<string, string> hints = 7;
+  repeated Hint hints = 7;
   int32 expire_timeout = 8;
   bool wait = 9;
   bool print_id = 10;
@@ -119,6 +126,31 @@ message Peer {
 // ListPeersResponse returns the current peer table.
 message ListPeersResponse {
   repeated Peer peers = 1;
+}
+
+// ============================================================================
+// P2P Messages
+// ============================================================================
+
+// NotifyMessage is the envelope published on the notifications topic.
+message NotifyMessage {
+  string type = 1;
+  string msg_id = 2;
+  string sender_peer_id = 3;
+  Notification notification = 4;
+  string action_key = 5;
+  string event = 6;
+  uint32 reason = 7;
+}
+
+// PresenceMessage is published on the presence topic.
+message PresenceMessage {
+  string peer_id = 1;
+  string hostname = 2;
+  bool is_present = 3;
+  int32 priority = 4;
+  bool leaving = 5;
+  int64 timestamp = 6;
 }
 
 // ============================================================================

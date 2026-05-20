@@ -273,13 +273,13 @@ func protocolToProto(resp protocol.NotifyResponse) *notify_relayv1.NotificationR
 	}
 }
 
-func hintsFromProto(hints map[string]string) []protocol.Hint {
+func hintsFromProto(hints []*notify_relayv1.Hint) []protocol.Hint {
 	result := make([]protocol.Hint, 0, len(hints))
-	for name, value := range hints {
+	for _, h := range hints {
 		result = append(result, protocol.Hint{
-			Name:  name,
-			Type:  "string",
-			Value: value,
+			Name:  h.GetName(),
+			Type:  h.GetType(),
+			Value: h.GetValue(),
 		})
 	}
 	return result

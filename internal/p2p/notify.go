@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,7 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
 )
 
@@ -21,19 +22,53 @@ const (
 	MsgTypeAction       = "action"
 )
 
-// NotifyMessage is the envelope published on the notifications topic.
-type NotifyMessage struct {
-	Type         string `json:"type"`
-	MsgID        string `json:"msg_id"`
-	SenderPeerID string `json:"sender_peer_id"`
+func notificationToProto(req protocol.NotifyRequest) *notify_relayv1.Notification {
+	hints := make([]*notify_relayv1.Hint, 0, len(req.Hints))
+	for _, h := range req.Hints {
+		hints = append(hints, &notify_relayv1.Hint{
+			Name:  h.Name,
+			Type:  h.Type,
+			Value: h.Value,
+		})
+	}
+	return &notify_relayv1.Notification{
+		AppName:       req.AppName,
+		ReplacesId:    req.ReplacesID,
+		AppIcon:       req.AppIcon,
+		Summary:       req.Summary,
+		Body:          req.Body,
+		Actions:       req.Actions,
+		Hints:         hints,
+		ExpireTimeout: req.ExpireTimeout,
+		Wait:          req.Wait,
+		PrintId:       req.PrintID,
+	}
+}
 
-	// For MsgTypeNotification
-	Notification *protocol.NotifyRequest `json:"notification,omitempty"`
-
-	// For MsgTypeAction
-	ActionKey string `json:"action_key,omitempty"`
-	Event     string `json:"event,omitempty"`
-	Reason    uint32 `json:"reason,omitempty"`
+func notificationFromProto(n *notify_relayv1.Notification) protocol.NotifyRequest {
+	if n == nil {
+		return protocol.NotifyRequest{}
+	}
+	hints := make([]protocol.Hint, 0, len(n.Hints))
+	for _, h := range n.Hints {
+		hints = append(hints, protocol.Hint{
+			Name:  h.GetName(),
+			Type:  h.GetType(),
+			Value: h.GetValue(),
+		})
+	}
+	return protocol.NotifyRequest{
+		AppName:       n.AppName,
+		ReplacesID:    n.ReplacesId,
+		AppIcon:       n.AppIcon,
+		Summary:       n.Summary,
+		Body:          n.Body,
+		Actions:       n.Actions,
+		Hints:         hints,
+		ExpireTimeout: n.ExpireTimeout,
+		Wait:          n.Wait,
+		PrintID:       n.PrintId,
+	}
 }
 
 // NotifyHandler is called when a notification is received from the p2p network.
@@ -188,14 +223,14 @@ func (s *NotifyService) Publish(ctx context.Context, req protocol.NotifyRequest,
 }
 
 func (s *NotifyService) publishMsg(ctx context.Context, msgID string, req protocol.NotifyRequest) bool {
-	msg := NotifyMessage{
+	msg := &notify_relayv1.NotifyMessage{
 		Type:         MsgTypeNotification,
-		MsgID:        msgID,
-		SenderPeerID: s.host.ID().String(),
-		Notification: &req,
+		MsgId:        msgID,
+		SenderPeerId: s.host.ID().String(),
+		Notification: notificationToProto(req),
 	}
 
-	data, err := json.Marshal(msg)
+	data, err := protojson.Marshal(msg)
 	if err != nil {
 		slog.Error("marshal notification failed", "error", err)
 		return false
@@ -234,8 +269,8 @@ func (s *NotifyService) handleSubscription(ctx context.Context, sub *Subscriptio
 			continue
 		}
 
-		var msg NotifyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
+		msg := &notify_relayv1.NotifyMessage{}
+		if err := protojson.Unmarshal(data, msg); err != nil {
 			slog.Debug("invalid notification message", "error", err)
 			continue
 		}
@@ -256,8 +291,8 @@ func (s *NotifyService) handleSubscription(ctx context.Context, sub *Subscriptio
 	}
 }
 
-func (s *NotifyService) handleNotification(ctx context.Context, msg NotifyMessage) {
-	senderID, err := peer.Decode(msg.SenderPeerID)
+func (s *NotifyService) handleNotification(ctx context.Context, msg *notify_relayv1.NotifyMessage) {
+	senderID, err := peer.Decode(msg.SenderPeerId)
 	if err != nil {
 		return
 	}
@@ -269,33 +304,34 @@ func (s *NotifyService) handleNotification(ctx context.Context, msg NotifyMessag
 		return
 	}
 
-	slog.Debug("received notification from peer", "sender", msg.SenderPeerID, "summary", msg.Notification.Summary)
+	slog.Debug("received notification from peer", "sender", msg.SenderPeerId, "summary", msg.Notification.Summary)
 
-	resp, err := s.handler(ctx, *msg.Notification)
+	req := notificationFromProto(msg.Notification)
+	resp, err := s.handler(ctx, req)
 	if err != nil {
 		slog.Debug("notification handler returned error", "error", err)
 		return
 	}
 
 	if resp.Event != "" {
-		action := NotifyMessage{
+		action := &notify_relayv1.NotifyMessage{
 			Type:         MsgTypeAction,
-			MsgID:        msg.MsgID,
-			SenderPeerID: msg.SenderPeerID,
+			MsgId:        msg.MsgId,
+			SenderPeerId: msg.SenderPeerId,
 			ActionKey:    resp.ActionKey,
 			Event:        resp.Event,
 			Reason:       resp.Reason,
 		}
-		actionData, _ := json.Marshal(action)
+		actionData, _ := protojson.Marshal(action)
 		if err := s.topic.Publish(ctx, actionData); err != nil {
 			slog.Debug("publish action reply failed", "error", err)
 		}
 	}
 }
 
-func (s *NotifyService) handleAction(msg NotifyMessage) {
+func (s *NotifyService) handleAction(msg *notify_relayv1.NotifyMessage) {
 	s.pendingMu.Lock()
-	pn, ok := s.pending[msg.MsgID]
+	pn, ok := s.pending[msg.MsgId]
 	s.pendingMu.Unlock()
 
 	if ok {

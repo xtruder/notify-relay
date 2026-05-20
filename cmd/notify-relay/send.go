@@ -202,9 +202,12 @@ func sendNotification(endpoint, token string, req protocol.NotifyRequest) (proto
 		Wait:          req.Wait,
 		PrintId:       req.PrintID,
 	}
-	grpcReq.Hints = make(map[string]string)
 	for _, hint := range req.Hints {
-		grpcReq.Hints[hint.Name] = hint.Value
+		grpcReq.Hints = append(grpcReq.Hints, &notify_relayv1.Hint{
+			Name:  hint.Name,
+			Type:  hint.Type,
+			Value: hint.Value,
+		})
 	}
 
 	if token != "" {

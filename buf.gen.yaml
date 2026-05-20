@@ -10,3 +10,7 @@ plugins:
     out: internal/proto
     opt:
       - paths=source_relative
+  - plugin: es
+    out: web/src/gen
+    opt:
+      - target=ts

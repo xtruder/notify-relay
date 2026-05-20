@@ -21,6 +21,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Hint represents a single hint key-value pair with type information.
+type Hint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Hint) Reset() {
+	*x = Hint{}
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Hint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Hint) ProtoMessage() {}
+
+func (x *Hint) ProtoReflect() protoreflect.Message {
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Hint.ProtoReflect.Descriptor instead.
+func (*Hint) Descriptor() ([]byte, []int) {
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Hint) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Hint) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *Hint) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 // Notification represents a desktop notification
 type Notification struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -30,7 +91,7 @@ type Notification struct {
 	Summary       string                 `protobuf:"bytes,4,opt,name=summary,proto3" json:"summary,omitempty"`
 	Body          string                 `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
 	Actions       []string               `protobuf:"bytes,6,rep,name=actions,proto3" json:"actions,omitempty"`
-	Hints         map[string]string      `protobuf:"bytes,7,rep,name=hints,proto3" json:"hints,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Hints         []*Hint                `protobuf:"bytes,7,rep,name=hints,proto3" json:"hints,omitempty"`
 	ExpireTimeout int32                  `protobuf:"varint,8,opt,name=expire_timeout,json=expireTimeout,proto3" json:"expire_timeout,omitempty"`
 	Wait          bool                   `protobuf:"varint,9,opt,name=wait,proto3" json:"wait,omitempty"`
 	PrintId       bool                   `protobuf:"varint,10,opt,name=print_id,json=printId,proto3" json:"print_id,omitempty"`
@@ -40,7 +101,7 @@ type Notification struct {
 
 func (x *Notification) Reset() {
 	*x = Notification{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[0]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -52,7 +113,7 @@ func (x *Notification) String() string {
 func (*Notification) ProtoMessage() {}
 
 func (x *Notification) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[0]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -65,7 +126,7 @@ func (x *Notification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Notification.ProtoReflect.Descriptor instead.
 func (*Notification) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{0}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Notification) GetAppName() string {
@@ -110,7 +171,7 @@ func (x *Notification) GetActions() []string {
 	return nil
 }
 
-func (x *Notification) GetHints() map[string]string {
+func (x *Notification) GetHints() []*Hint {
 	if x != nil {
 		return x.Hints
 	}
@@ -151,7 +212,7 @@ type NotificationResponse struct {
 
 func (x *NotificationResponse) Reset() {
 	*x = NotificationResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[1]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -163,7 +224,7 @@ func (x *NotificationResponse) String() string {
 func (*NotificationResponse) ProtoMessage() {}
 
 func (x *NotificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[1]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -176,7 +237,7 @@ func (x *NotificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotificationResponse.ProtoReflect.Descriptor instead.
 func (*NotificationResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{1}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NotificationResponse) GetId() uint32 {
@@ -217,7 +278,7 @@ type CloseRequest struct {
 
 func (x *CloseRequest) Reset() {
 	*x = CloseRequest{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[2]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -229,7 +290,7 @@ func (x *CloseRequest) String() string {
 func (*CloseRequest) ProtoMessage() {}
 
 func (x *CloseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[2]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -242,7 +303,7 @@ func (x *CloseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseRequest.ProtoReflect.Descriptor instead.
 func (*CloseRequest) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{2}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CloseRequest) GetId() uint32 {
@@ -262,7 +323,7 @@ type CloseResponse struct {
 
 func (x *CloseResponse) Reset() {
 	*x = CloseResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[3]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -274,7 +335,7 @@ func (x *CloseResponse) String() string {
 func (*CloseResponse) ProtoMessage() {}
 
 func (x *CloseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[3]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,7 +348,7 @@ func (x *CloseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseResponse.ProtoReflect.Descriptor instead.
 func (*CloseResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{3}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CloseResponse) GetSuccess() bool {
@@ -306,7 +367,7 @@ type CapabilitiesRequest struct {
 
 func (x *CapabilitiesRequest) Reset() {
 	*x = CapabilitiesRequest{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[4]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +379,7 @@ func (x *CapabilitiesRequest) String() string {
 func (*CapabilitiesRequest) ProtoMessage() {}
 
 func (x *CapabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[4]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +392,7 @@ func (x *CapabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*CapabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{4}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{5}
 }
 
 // CapabilitiesResponse lists what the server supports
@@ -344,7 +405,7 @@ type CapabilitiesResponse struct {
 
 func (x *CapabilitiesResponse) Reset() {
 	*x = CapabilitiesResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[5]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +417,7 @@ func (x *CapabilitiesResponse) String() string {
 func (*CapabilitiesResponse) ProtoMessage() {}
 
 func (x *CapabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[5]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +430,7 @@ func (x *CapabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*CapabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{5}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CapabilitiesResponse) GetCapabilities() []string {
@@ -388,7 +449,7 @@ type ServerInfoRequest struct {
 
 func (x *ServerInfoRequest) Reset() {
 	*x = ServerInfoRequest{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[6]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -400,7 +461,7 @@ func (x *ServerInfoRequest) String() string {
 func (*ServerInfoRequest) ProtoMessage() {}
 
 func (x *ServerInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[6]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +474,7 @@ func (x *ServerInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerInfoRequest.ProtoReflect.Descriptor instead.
 func (*ServerInfoRequest) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{6}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{7}
 }
 
 // ServerInfoResponse provides server details
@@ -429,7 +490,7 @@ type ServerInfoResponse struct {
 
 func (x *ServerInfoResponse) Reset() {
 	*x = ServerInfoResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[7]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -441,7 +502,7 @@ func (x *ServerInfoResponse) String() string {
 func (*ServerInfoResponse) ProtoMessage() {}
 
 func (x *ServerInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[7]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -454,7 +515,7 @@ func (x *ServerInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerInfoResponse.ProtoReflect.Descriptor instead.
 func (*ServerInfoResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{7}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ServerInfoResponse) GetName() string {
@@ -494,7 +555,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[8]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +567,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[8]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +580,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{8}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{9}
 }
 
 // HealthResponse confirms the server is healthy
@@ -532,7 +593,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[9]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -544,7 +605,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[9]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -557,7 +618,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{9}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HealthResponse) GetStatus() string {
@@ -579,7 +640,7 @@ type LockStateUpdate struct {
 
 func (x *LockStateUpdate) Reset() {
 	*x = LockStateUpdate{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[10]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +652,7 @@ func (x *LockStateUpdate) String() string {
 func (*LockStateUpdate) ProtoMessage() {}
 
 func (x *LockStateUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[10]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +665,7 @@ func (x *LockStateUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockStateUpdate.ProtoReflect.Descriptor instead.
 func (*LockStateUpdate) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{10}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *LockStateUpdate) GetHostname() string {
@@ -638,7 +699,7 @@ type HealthPing struct {
 
 func (x *HealthPing) Reset() {
 	*x = HealthPing{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[11]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +711,7 @@ func (x *HealthPing) String() string {
 func (*HealthPing) ProtoMessage() {}
 
 func (x *HealthPing) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[11]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +724,7 @@ func (x *HealthPing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthPing.ProtoReflect.Descriptor instead.
 func (*HealthPing) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{11}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HealthPing) GetTimestamp() int64 {
@@ -683,7 +744,7 @@ type HealthPong struct {
 
 func (x *HealthPong) Reset() {
 	*x = HealthPong{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[12]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +756,7 @@ func (x *HealthPong) String() string {
 func (*HealthPong) ProtoMessage() {}
 
 func (x *HealthPong) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[12]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +769,7 @@ func (x *HealthPong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthPong.ProtoReflect.Descriptor instead.
 func (*HealthPong) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{12}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HealthPong) GetTimestamp() int64 {
@@ -729,7 +790,7 @@ type ForwardedNotification struct {
 
 func (x *ForwardedNotification) Reset() {
 	*x = ForwardedNotification{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[13]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -741,7 +802,7 @@ func (x *ForwardedNotification) String() string {
 func (*ForwardedNotification) ProtoMessage() {}
 
 func (x *ForwardedNotification) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[13]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -754,7 +815,7 @@ func (x *ForwardedNotification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardedNotification.ProtoReflect.Descriptor instead.
 func (*ForwardedNotification) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{13}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ForwardedNotification) GetSourceHostname() string {
@@ -781,7 +842,7 @@ type ClientListUpdate struct {
 
 func (x *ClientListUpdate) Reset() {
 	*x = ClientListUpdate{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[14]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -793,7 +854,7 @@ func (x *ClientListUpdate) String() string {
 func (*ClientListUpdate) ProtoMessage() {}
 
 func (x *ClientListUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[14]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -806,7 +867,7 @@ func (x *ClientListUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientListUpdate.ProtoReflect.Descriptor instead.
 func (*ClientListUpdate) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{14}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ClientListUpdate) GetClients() []*RemoteClient {
@@ -829,7 +890,7 @@ type RemoteClient struct {
 
 func (x *RemoteClient) Reset() {
 	*x = RemoteClient{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[15]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -841,7 +902,7 @@ func (x *RemoteClient) String() string {
 func (*RemoteClient) ProtoMessage() {}
 
 func (x *RemoteClient) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[15]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -854,7 +915,7 @@ func (x *RemoteClient) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteClient.ProtoReflect.Descriptor instead.
 func (*RemoteClient) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{15}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RemoteClient) GetHostname() string {
@@ -894,7 +955,7 @@ type ListPeersRequest struct {
 
 func (x *ListPeersRequest) Reset() {
 	*x = ListPeersRequest{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[16]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -906,7 +967,7 @@ func (x *ListPeersRequest) String() string {
 func (*ListPeersRequest) ProtoMessage() {}
 
 func (x *ListPeersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[16]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -919,7 +980,7 @@ func (x *ListPeersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeersRequest.ProtoReflect.Descriptor instead.
 func (*ListPeersRequest) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{16}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{17}
 }
 
 // Peer describes a single entry in the peer table.
@@ -937,7 +998,7 @@ type Peer struct {
 
 func (x *Peer) Reset() {
 	*x = Peer{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[17]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1010,7 @@ func (x *Peer) String() string {
 func (*Peer) ProtoMessage() {}
 
 func (x *Peer) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[17]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1023,7 @@ func (x *Peer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Peer.ProtoReflect.Descriptor instead.
 func (*Peer) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{17}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Peer) GetPeerId() string {
@@ -1017,7 +1078,7 @@ type ListPeersResponse struct {
 
 func (x *ListPeersResponse) Reset() {
 	*x = ListPeersResponse{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[18]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1029,7 +1090,7 @@ func (x *ListPeersResponse) String() string {
 func (*ListPeersResponse) ProtoMessage() {}
 
 func (x *ListPeersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[18]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1042,7 +1103,7 @@ func (x *ListPeersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeersResponse.ProtoReflect.Descriptor instead.
 func (*ListPeersResponse) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{18}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListPeersResponse) GetPeers() []*Peer {
@@ -1050,6 +1111,184 @@ func (x *ListPeersResponse) GetPeers() []*Peer {
 		return x.Peers
 	}
 	return nil
+}
+
+// NotifyMessage is the envelope published on the notifications topic.
+type NotifyMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	MsgId         string                 `protobuf:"bytes,2,opt,name=msg_id,json=msgId,proto3" json:"msg_id,omitempty"`
+	SenderPeerId  string                 `protobuf:"bytes,3,opt,name=sender_peer_id,json=senderPeerId,proto3" json:"sender_peer_id,omitempty"`
+	Notification  *Notification          `protobuf:"bytes,4,opt,name=notification,proto3" json:"notification,omitempty"`
+	ActionKey     string                 `protobuf:"bytes,5,opt,name=action_key,json=actionKey,proto3" json:"action_key,omitempty"`
+	Event         string                 `protobuf:"bytes,6,opt,name=event,proto3" json:"event,omitempty"`
+	Reason        uint32                 `protobuf:"varint,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyMessage) Reset() {
+	*x = NotifyMessage{}
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyMessage) ProtoMessage() {}
+
+func (x *NotifyMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyMessage.ProtoReflect.Descriptor instead.
+func (*NotifyMessage) Descriptor() ([]byte, []int) {
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *NotifyMessage) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *NotifyMessage) GetMsgId() string {
+	if x != nil {
+		return x.MsgId
+	}
+	return ""
+}
+
+func (x *NotifyMessage) GetSenderPeerId() string {
+	if x != nil {
+		return x.SenderPeerId
+	}
+	return ""
+}
+
+func (x *NotifyMessage) GetNotification() *Notification {
+	if x != nil {
+		return x.Notification
+	}
+	return nil
+}
+
+func (x *NotifyMessage) GetActionKey() string {
+	if x != nil {
+		return x.ActionKey
+	}
+	return ""
+}
+
+func (x *NotifyMessage) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
+func (x *NotifyMessage) GetReason() uint32 {
+	if x != nil {
+		return x.Reason
+	}
+	return 0
+}
+
+// PresenceMessage is published on the presence topic.
+type PresenceMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Hostname      string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	IsPresent     bool                   `protobuf:"varint,3,opt,name=is_present,json=isPresent,proto3" json:"is_present,omitempty"`
+	Priority      int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
+	Leaving       bool                   `protobuf:"varint,5,opt,name=leaving,proto3" json:"leaving,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PresenceMessage) Reset() {
+	*x = PresenceMessage{}
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PresenceMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PresenceMessage) ProtoMessage() {}
+
+func (x *PresenceMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PresenceMessage.ProtoReflect.Descriptor instead.
+func (*PresenceMessage) Descriptor() ([]byte, []int) {
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *PresenceMessage) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *PresenceMessage) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *PresenceMessage) GetIsPresent() bool {
+	if x != nil {
+		return x.IsPresent
+	}
+	return false
+}
+
+func (x *PresenceMessage) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+func (x *PresenceMessage) GetLeaving() bool {
+	if x != nil {
+		return x.Leaving
+	}
+	return false
+}
+
+func (x *PresenceMessage) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
 }
 
 // ClientMessage is sent from client to server via the Connect stream
@@ -1067,7 +1306,7 @@ type ClientMessage struct {
 
 func (x *ClientMessage) Reset() {
 	*x = ClientMessage{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[19]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1318,7 @@ func (x *ClientMessage) String() string {
 func (*ClientMessage) ProtoMessage() {}
 
 func (x *ClientMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[19]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1331,7 @@ func (x *ClientMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientMessage.ProtoReflect.Descriptor instead.
 func (*ClientMessage) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{19}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ClientMessage) GetMessage() isClientMessage_Message {
@@ -1166,7 +1405,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[20]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1178,7 +1417,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_notify_relay_v1_relay_proto_msgTypes[20]
+	mi := &file_notify_relay_v1_relay_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1191,7 +1430,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{20}
+	return file_notify_relay_v1_relay_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ServerMessage) GetMessage() isServerMessage_Message {
@@ -1254,7 +1493,11 @@ var File_notify_relay_v1_relay_proto protoreflect.FileDescriptor
 
 const file_notify_relay_v1_relay_proto_rawDesc = "" +
 	"\n" +
-	"\x1bnotify_relay/v1/relay.proto\x12\x0fnotify_relay.v1\"\xfd\x02\n" +
+	"\x1bnotify_relay/v1/relay.proto\x12\x0fnotify_relay.v1\"D\n" +
+	"\x04Hint\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xb0\x02\n" +
 	"\fNotification\x12\x19\n" +
 	"\bapp_name\x18\x01 \x01(\tR\aappName\x12\x1f\n" +
 	"\vreplaces_id\x18\x02 \x01(\rR\n" +
@@ -1262,16 +1505,12 @@ const file_notify_relay_v1_relay_proto_rawDesc = "" +
 	"\bapp_icon\x18\x03 \x01(\tR\aappIcon\x12\x18\n" +
 	"\asummary\x18\x04 \x01(\tR\asummary\x12\x12\n" +
 	"\x04body\x18\x05 \x01(\tR\x04body\x12\x18\n" +
-	"\aactions\x18\x06 \x03(\tR\aactions\x12>\n" +
-	"\x05hints\x18\a \x03(\v2(.notify_relay.v1.Notification.HintsEntryR\x05hints\x12%\n" +
+	"\aactions\x18\x06 \x03(\tR\aactions\x12+\n" +
+	"\x05hints\x18\a \x03(\v2\x15.notify_relay.v1.HintR\x05hints\x12%\n" +
 	"\x0eexpire_timeout\x18\b \x01(\x05R\rexpireTimeout\x12\x12\n" +
 	"\x04wait\x18\t \x01(\bR\x04wait\x12\x19\n" +
 	"\bprint_id\x18\n" +
-	" \x01(\bR\aprintId\x1a8\n" +
-	"\n" +
-	"HintsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"s\n" +
+	" \x01(\bR\aprintId\"s\n" +
 	"\x14NotificationResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05event\x18\x02 \x01(\tR\x05event\x12\x16\n" +
@@ -1324,7 +1563,24 @@ const file_notify_relay_v1_relay_proto_rawDesc = "" +
 	"\x13last_seen_unix_nano\x18\x05 \x01(\x03R\x10lastSeenUnixNano\x12\x19\n" +
 	"\bis_local\x18\x06 \x01(\bR\aisLocal\"@\n" +
 	"\x11ListPeersResponse\x12+\n" +
-	"\x05peers\x18\x01 \x03(\v2\x15.notify_relay.v1.PeerR\x05peers\"\xd5\x01\n" +
+	"\x05peers\x18\x01 \x03(\v2\x15.notify_relay.v1.PeerR\x05peers\"\xf0\x01\n" +
+	"\rNotifyMessage\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x15\n" +
+	"\x06msg_id\x18\x02 \x01(\tR\x05msgId\x12$\n" +
+	"\x0esender_peer_id\x18\x03 \x01(\tR\fsenderPeerId\x12A\n" +
+	"\fnotification\x18\x04 \x01(\v2\x1d.notify_relay.v1.NotificationR\fnotification\x12\x1d\n" +
+	"\n" +
+	"action_key\x18\x05 \x01(\tR\tactionKey\x12\x14\n" +
+	"\x05event\x18\x06 \x01(\tR\x05event\x12\x16\n" +
+	"\x06reason\x18\a \x01(\rR\x06reason\"\xb9\x01\n" +
+	"\x0fPresenceMessage\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
+	"\n" +
+	"is_present\x18\x03 \x01(\bR\tisPresent\x12\x1a\n" +
+	"\bpriority\x18\x04 \x01(\x05R\bpriority\x12\x18\n" +
+	"\aleaving\x18\x05 \x01(\bR\aleaving\x12\x1c\n" +
+	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\"\xd5\x01\n" +
 	"\rClientMessage\x12A\n" +
 	"\n" +
 	"lock_state\x18\x01 \x01(\v2 .notify_relay.v1.LockStateUpdateH\x00R\tlockState\x121\n" +
@@ -1360,61 +1616,64 @@ func file_notify_relay_v1_relay_proto_rawDescGZIP() []byte {
 	return file_notify_relay_v1_relay_proto_rawDescData
 }
 
-var file_notify_relay_v1_relay_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_notify_relay_v1_relay_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_notify_relay_v1_relay_proto_goTypes = []any{
-	(*Notification)(nil),          // 0: notify_relay.v1.Notification
-	(*NotificationResponse)(nil),  // 1: notify_relay.v1.NotificationResponse
-	(*CloseRequest)(nil),          // 2: notify_relay.v1.CloseRequest
-	(*CloseResponse)(nil),         // 3: notify_relay.v1.CloseResponse
-	(*CapabilitiesRequest)(nil),   // 4: notify_relay.v1.CapabilitiesRequest
-	(*CapabilitiesResponse)(nil),  // 5: notify_relay.v1.CapabilitiesResponse
-	(*ServerInfoRequest)(nil),     // 6: notify_relay.v1.ServerInfoRequest
-	(*ServerInfoResponse)(nil),    // 7: notify_relay.v1.ServerInfoResponse
-	(*HealthRequest)(nil),         // 8: notify_relay.v1.HealthRequest
-	(*HealthResponse)(nil),        // 9: notify_relay.v1.HealthResponse
-	(*LockStateUpdate)(nil),       // 10: notify_relay.v1.LockStateUpdate
-	(*HealthPing)(nil),            // 11: notify_relay.v1.HealthPing
-	(*HealthPong)(nil),            // 12: notify_relay.v1.HealthPong
-	(*ForwardedNotification)(nil), // 13: notify_relay.v1.ForwardedNotification
-	(*ClientListUpdate)(nil),      // 14: notify_relay.v1.ClientListUpdate
-	(*RemoteClient)(nil),          // 15: notify_relay.v1.RemoteClient
-	(*ListPeersRequest)(nil),      // 16: notify_relay.v1.ListPeersRequest
-	(*Peer)(nil),                  // 17: notify_relay.v1.Peer
-	(*ListPeersResponse)(nil),     // 18: notify_relay.v1.ListPeersResponse
-	(*ClientMessage)(nil),         // 19: notify_relay.v1.ClientMessage
-	(*ServerMessage)(nil),         // 20: notify_relay.v1.ServerMessage
-	nil,                           // 21: notify_relay.v1.Notification.HintsEntry
+	(*Hint)(nil),                  // 0: notify_relay.v1.Hint
+	(*Notification)(nil),          // 1: notify_relay.v1.Notification
+	(*NotificationResponse)(nil),  // 2: notify_relay.v1.NotificationResponse
+	(*CloseRequest)(nil),          // 3: notify_relay.v1.CloseRequest
+	(*CloseResponse)(nil),         // 4: notify_relay.v1.CloseResponse
+	(*CapabilitiesRequest)(nil),   // 5: notify_relay.v1.CapabilitiesRequest
+	(*CapabilitiesResponse)(nil),  // 6: notify_relay.v1.CapabilitiesResponse
+	(*ServerInfoRequest)(nil),     // 7: notify_relay.v1.ServerInfoRequest
+	(*ServerInfoResponse)(nil),    // 8: notify_relay.v1.ServerInfoResponse
+	(*HealthRequest)(nil),         // 9: notify_relay.v1.HealthRequest
+	(*HealthResponse)(nil),        // 10: notify_relay.v1.HealthResponse
+	(*LockStateUpdate)(nil),       // 11: notify_relay.v1.LockStateUpdate
+	(*HealthPing)(nil),            // 12: notify_relay.v1.HealthPing
+	(*HealthPong)(nil),            // 13: notify_relay.v1.HealthPong
+	(*ForwardedNotification)(nil), // 14: notify_relay.v1.ForwardedNotification
+	(*ClientListUpdate)(nil),      // 15: notify_relay.v1.ClientListUpdate
+	(*RemoteClient)(nil),          // 16: notify_relay.v1.RemoteClient
+	(*ListPeersRequest)(nil),      // 17: notify_relay.v1.ListPeersRequest
+	(*Peer)(nil),                  // 18: notify_relay.v1.Peer
+	(*ListPeersResponse)(nil),     // 19: notify_relay.v1.ListPeersResponse
+	(*NotifyMessage)(nil),         // 20: notify_relay.v1.NotifyMessage
+	(*PresenceMessage)(nil),       // 21: notify_relay.v1.PresenceMessage
+	(*ClientMessage)(nil),         // 22: notify_relay.v1.ClientMessage
+	(*ServerMessage)(nil),         // 23: notify_relay.v1.ServerMessage
 }
 var file_notify_relay_v1_relay_proto_depIdxs = []int32{
-	21, // 0: notify_relay.v1.Notification.hints:type_name -> notify_relay.v1.Notification.HintsEntry
-	0,  // 1: notify_relay.v1.ForwardedNotification.notification:type_name -> notify_relay.v1.Notification
-	15, // 2: notify_relay.v1.ClientListUpdate.clients:type_name -> notify_relay.v1.RemoteClient
-	17, // 3: notify_relay.v1.ListPeersResponse.peers:type_name -> notify_relay.v1.Peer
-	10, // 4: notify_relay.v1.ClientMessage.lock_state:type_name -> notify_relay.v1.LockStateUpdate
-	11, // 5: notify_relay.v1.ClientMessage.ping:type_name -> notify_relay.v1.HealthPing
-	1,  // 6: notify_relay.v1.ClientMessage.response:type_name -> notify_relay.v1.NotificationResponse
-	13, // 7: notify_relay.v1.ServerMessage.notification:type_name -> notify_relay.v1.ForwardedNotification
-	12, // 8: notify_relay.v1.ServerMessage.pong:type_name -> notify_relay.v1.HealthPong
-	14, // 9: notify_relay.v1.ServerMessage.client_list:type_name -> notify_relay.v1.ClientListUpdate
-	0,  // 10: notify_relay.v1.RelayService.Notify:input_type -> notify_relay.v1.Notification
-	2,  // 11: notify_relay.v1.RelayService.CloseNotification:input_type -> notify_relay.v1.CloseRequest
-	4,  // 12: notify_relay.v1.RelayService.GetCapabilities:input_type -> notify_relay.v1.CapabilitiesRequest
-	6,  // 13: notify_relay.v1.RelayService.GetServerInfo:input_type -> notify_relay.v1.ServerInfoRequest
-	8,  // 14: notify_relay.v1.RelayService.Health:input_type -> notify_relay.v1.HealthRequest
-	19, // 15: notify_relay.v1.RelayService.Connect:input_type -> notify_relay.v1.ClientMessage
-	16, // 16: notify_relay.v1.RelayService.ListPeers:input_type -> notify_relay.v1.ListPeersRequest
-	1,  // 17: notify_relay.v1.RelayService.Notify:output_type -> notify_relay.v1.NotificationResponse
-	3,  // 18: notify_relay.v1.RelayService.CloseNotification:output_type -> notify_relay.v1.CloseResponse
-	5,  // 19: notify_relay.v1.RelayService.GetCapabilities:output_type -> notify_relay.v1.CapabilitiesResponse
-	7,  // 20: notify_relay.v1.RelayService.GetServerInfo:output_type -> notify_relay.v1.ServerInfoResponse
-	9,  // 21: notify_relay.v1.RelayService.Health:output_type -> notify_relay.v1.HealthResponse
-	20, // 22: notify_relay.v1.RelayService.Connect:output_type -> notify_relay.v1.ServerMessage
-	18, // 23: notify_relay.v1.RelayService.ListPeers:output_type -> notify_relay.v1.ListPeersResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 0: notify_relay.v1.Notification.hints:type_name -> notify_relay.v1.Hint
+	1,  // 1: notify_relay.v1.ForwardedNotification.notification:type_name -> notify_relay.v1.Notification
+	16, // 2: notify_relay.v1.ClientListUpdate.clients:type_name -> notify_relay.v1.RemoteClient
+	18, // 3: notify_relay.v1.ListPeersResponse.peers:type_name -> notify_relay.v1.Peer
+	1,  // 4: notify_relay.v1.NotifyMessage.notification:type_name -> notify_relay.v1.Notification
+	11, // 5: notify_relay.v1.ClientMessage.lock_state:type_name -> notify_relay.v1.LockStateUpdate
+	12, // 6: notify_relay.v1.ClientMessage.ping:type_name -> notify_relay.v1.HealthPing
+	2,  // 7: notify_relay.v1.ClientMessage.response:type_name -> notify_relay.v1.NotificationResponse
+	14, // 8: notify_relay.v1.ServerMessage.notification:type_name -> notify_relay.v1.ForwardedNotification
+	13, // 9: notify_relay.v1.ServerMessage.pong:type_name -> notify_relay.v1.HealthPong
+	15, // 10: notify_relay.v1.ServerMessage.client_list:type_name -> notify_relay.v1.ClientListUpdate
+	1,  // 11: notify_relay.v1.RelayService.Notify:input_type -> notify_relay.v1.Notification
+	3,  // 12: notify_relay.v1.RelayService.CloseNotification:input_type -> notify_relay.v1.CloseRequest
+	5,  // 13: notify_relay.v1.RelayService.GetCapabilities:input_type -> notify_relay.v1.CapabilitiesRequest
+	7,  // 14: notify_relay.v1.RelayService.GetServerInfo:input_type -> notify_relay.v1.ServerInfoRequest
+	9,  // 15: notify_relay.v1.RelayService.Health:input_type -> notify_relay.v1.HealthRequest
+	22, // 16: notify_relay.v1.RelayService.Connect:input_type -> notify_relay.v1.ClientMessage
+	17, // 17: notify_relay.v1.RelayService.ListPeers:input_type -> notify_relay.v1.ListPeersRequest
+	2,  // 18: notify_relay.v1.RelayService.Notify:output_type -> notify_relay.v1.NotificationResponse
+	4,  // 19: notify_relay.v1.RelayService.CloseNotification:output_type -> notify_relay.v1.CloseResponse
+	6,  // 20: notify_relay.v1.RelayService.GetCapabilities:output_type -> notify_relay.v1.CapabilitiesResponse
+	8,  // 21: notify_relay.v1.RelayService.GetServerInfo:output_type -> notify_relay.v1.ServerInfoResponse
+	10, // 22: notify_relay.v1.RelayService.Health:output_type -> notify_relay.v1.HealthResponse
+	23, // 23: notify_relay.v1.RelayService.Connect:output_type -> notify_relay.v1.ServerMessage
+	19, // 24: notify_relay.v1.RelayService.ListPeers:output_type -> notify_relay.v1.ListPeersResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_notify_relay_v1_relay_proto_init() }
@@ -1422,12 +1681,12 @@ func file_notify_relay_v1_relay_proto_init() {
 	if File_notify_relay_v1_relay_proto != nil {
 		return
 	}
-	file_notify_relay_v1_relay_proto_msgTypes[19].OneofWrappers = []any{
+	file_notify_relay_v1_relay_proto_msgTypes[22].OneofWrappers = []any{
 		(*ClientMessage_LockState)(nil),
 		(*ClientMessage_Ping)(nil),
 		(*ClientMessage_Response)(nil),
 	}
-	file_notify_relay_v1_relay_proto_msgTypes[20].OneofWrappers = []any{
+	file_notify_relay_v1_relay_proto_msgTypes[23].OneofWrappers = []any{
 		(*ServerMessage_Notification)(nil),
 		(*ServerMessage_Pong)(nil),
 		(*ServerMessage_ClientList)(nil),
@@ -1438,7 +1697,7 @@ func file_notify_relay_v1_relay_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_notify_relay_v1_relay_proto_rawDesc), len(file_notify_relay_v1_relay_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
