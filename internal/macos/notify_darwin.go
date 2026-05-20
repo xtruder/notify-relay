@@ -13,7 +13,7 @@ import (
 )
 
 /*
-#cgo CFLAGS: -Wno-deprecated-declarations
+#cgo CFLAGS: -x objective-c -Wno-deprecated-declarations
 #cgo LDFLAGS: -framework Foundation
 #import <Foundation/Foundation.h>
 
