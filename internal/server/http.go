@@ -19,10 +19,11 @@ import (
 )
 
 type Config struct {
-	Listen    string `toml:"listen,omitempty" json:"listen" comment:"TCP listen address for local gRPC API"`
-	Unix      string `toml:"unix,omitempty" json:"unix" comment:"Unix socket path for local gRPC API"`
-	Token     string `toml:"token,omitempty" json:"token"`
-	TokenFile string `toml:"token_file,omitempty" json:"token_file"`
+	Listen        string `toml:"listen,omitempty" json:"listen" comment:"TCP listen address for local gRPC API"`
+	Unix          string `toml:"unix,omitempty" json:"unix" comment:"Unix socket path for local gRPC API"`
+	Token         string `toml:"token,omitempty" json:"token"`
+	TokenFile     string `toml:"token_file,omitempty" json:"token_file"`
+	WebhookListen string `toml:"webhook_listen,omitempty" json:"webhook_listen" comment:"TCP listen address for ntfy action webhooks"`
 }
 
 type Server struct {

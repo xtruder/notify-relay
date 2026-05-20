@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 
 // Config holds ntfy channel configuration
 type Config struct {
-	Server string `toml:"server" json:"server"`                   // e.g., "https://ntfy.sh"
-	Topic  string `toml:"topic" json:"topic"`                     // e.g., "my-laptop-notifications"
-	Token  string `toml:"token,omitempty" json:"token,omitempty"` // optional access token
+	Server     string `toml:"server" json:"server"`                               // e.g., "https://ntfy.sh"
+	Topic      string `toml:"topic" json:"topic"`                                 // e.g., "my-laptop-notifications"
+	Token      string `toml:"token,omitempty" json:"token,omitempty"`             // optional access token
+	WebhookURL string `toml:"webhook_url,omitempty" json:"webhook_url,omitempty"` // public URL for action callbacks
 }
 
 // Channel implements channel.Channel for ntfy.sh notifications
 type Channel struct {
-	config Config
-	client *http.Client
+	config         Config
+	client         *http.Client
+	webhookHandler *WebhookHandler
 }
 
 // Compile-time interface check
@@ -45,6 +48,11 @@ func New(config Config) (*Channel, error) {
 			Timeout: 30 * time.Second,
 		},
 	}, nil
+}
+
+// SetWebhookHandler sets the webhook handler for action callbacks.
+func (c *Channel) SetWebhookHandler(h *WebhookHandler) {
+	c.webhookHandler = h
 }
 
 // Name returns "ntfy"
@@ -86,6 +94,21 @@ func (c *Channel) Send(ctx context.Context, req protocol.NotifyRequest) (protoco
 		}
 	}
 
+	// Register webhook and build action buttons only when waiting for a response
+	var token string
+	var actionCh chan ActionEvent
+	if req.Wait && c.webhookHandler != nil && c.config.WebhookURL != "" && len(req.Actions) > 0 {
+		token, actionCh = c.webhookHandler.Register()
+		actions := c.buildActions(req.Actions, token)
+		if actions != "" {
+			httpReq.Header.Set("Actions", actions)
+		}
+	}
+
+	if actionCh != nil {
+		defer c.webhookHandler.Unregister(token)
+	}
+
 	// Add authorization if token is configured
 	if c.config.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.config.Token)
@@ -102,11 +125,23 @@ func (c *Channel) Send(ctx context.Context, req protocol.NotifyRequest) (protoco
 	}
 
 	// Generate a pseudo-ID for ntfy notifications
-	// Since ntfy doesn't have a notification ID system like dbus,
-	// we generate one based on time
-	return protocol.NotifyResponse{
+	result := protocol.NotifyResponse{
 		ID: uint32(time.Now().Unix()),
-	}, nil
+	}
+
+	// Wait for action callback if requested
+	if !req.Wait || actionCh == nil {
+		return result, nil
+	}
+
+	select {
+	case event := <-actionCh:
+		result.Event = "action_invoked"
+		result.ActionKey = event.ActionKey
+		return result, nil
+	case <-ctx.Done():
+		return protocol.NotifyResponse{}, ctx.Err()
+	}
 }
 
 // Capabilities returns limited capabilities for ntfy
@@ -123,6 +158,36 @@ func (c *Channel) ServerInfo(ctx context.Context) (protocol.ServerInfoResponse, 
 		Version: "1.0",
 		Spec:    "1.2",
 	}, nil
+}
+
+// buildActions converts dbus-style actions to ntfy Actions header.
+// Actions are sent as http callbacks to the webhook handler.
+// ntfy supports up to 3 action buttons.
+func (c *Channel) buildActions(actions []string, token string) string {
+	if len(actions) == 0 || len(actions)%2 != 0 || c.config.WebhookURL == "" {
+		return ""
+	}
+
+	baseURL := strings.TrimRight(c.config.WebhookURL, "/") + "/" + token
+	var parts []string
+	count := 0
+
+	for i := 0; i < len(actions) && count < 3; i += 2 {
+		key := actions[i]
+		label := actions[i+1]
+
+		// Skip the dbus "default" action which is not a button
+		if key == "default" {
+			continue
+		}
+
+		actionURL := fmt.Sprintf("%s?action=%s", baseURL, url.QueryEscape(key))
+		part := fmt.Sprintf("http, %s, %s, method=GET, clear=true", label, actionURL)
+		parts = append(parts, part)
+		count++
+	}
+
+	return strings.Join(parts, "; ")
 }
 
 // priorityFromHints extracts priority from urgency hint

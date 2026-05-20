@@ -301,6 +301,52 @@ func TestNtfyChannelWithCategory(t *testing.T) {
 	t.Log("Sent notification with category tags")
 }
 
+// TestNtfyChannelWithActions tests ntfy action buttons via webhooks
+func TestNtfyChannelWithActions(t *testing.T) {
+	// Skip in CI environments without network access
+	if os.Getenv("CI") == "true" && os.Getenv("TEST_NTFY") != "1" {
+		t.Skip("Skipping live ntfy test in CI. Set TEST_NTFY=1 to run.")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	wh := ntfy.NewWebhookHandler()
+
+	cfg := ntfy.Config{
+		Server:     "https://ntfy.sh",
+		Topic:      "offlinehq-opencode",
+		WebhookURL: "https://example.com/webhooks/ntfy",
+	}
+
+	ch, err := ntfy.New(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create ntfy channel: %v", err)
+	}
+	ch.SetWebhookHandler(wh)
+	defer ch.Close()
+
+	req := protocol.NotifyRequest{
+		AppName: "notify-relay-test",
+		Summary: "Action Test",
+		Body:    "This notification has action buttons",
+		Actions: []string{"reply", "Reply", "dismiss", "Dismiss"},
+		Wait:    false, // fire-and-forget for live test
+	}
+
+	resp, err := ch.Send(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to send notification with actions: %v", err)
+	}
+
+	if resp.ID == 0 {
+		t.Error("Expected non-zero response ID")
+	}
+
+	t.Logf("Sent notification with actions to ntfy.sh/offlinehq-opencode, got ID: %d", resp.ID)
+	t.Log("Check https://ntfy.sh/offlinehq-opencode to see the action buttons")
+}
+
 // TestConditionInterfaces tests condition evaluation
 func TestConditionInterfaces(t *testing.T) {
 	ctx := context.Background()

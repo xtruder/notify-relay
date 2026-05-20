@@ -180,7 +180,10 @@ func serve(cfg config.Config) error {
 		})
 	}
 
-	channels, err := createChannels(gctx, g, cfg.Channels)
+	webhookHandler := ntfy.NewWebhookHandler()
+	webhookHandler.StartCleanup(gctx)
+
+	channels, err := createChannels(gctx, g, cfg.Channels, webhookHandler)
 	if err != nil {
 		return fmt.Errorf("init channels: %w", err)
 	}
@@ -275,6 +278,25 @@ func serve(cfg config.Config) error {
 		})
 	}
 
+	if cfg.Server.WebhookListen != "" {
+		if err := webhookHandler.Listen(cfg.Server.WebhookListen); err != nil {
+			return fmt.Errorf("init webhook server: %w", err)
+		}
+		g.Go(func() error {
+			<-gctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			webhookHandler.Shutdown(shutdownCtx)
+			return nil
+		})
+		g.Go(func() error {
+			if err := webhookHandler.Serve(); err != nil {
+				return fmt.Errorf("webhook server: %w", err)
+			}
+			return nil
+		})
+	}
+
 	err = g.Wait()
 	slog.Info("shutting down")
 	// rootCtx cancellation (SIGINT) propagates to gctx and members return
@@ -351,7 +373,7 @@ func buildRouterConfig(routes []router.Route) router.Config {
 // createChannels constructs notification channels from config. Channels
 // with a Start/Close lifecycle (e.g. dbus) are launched via the supplied
 // errgroup, which ties their lifetime to the rest of serve's services.
-func createChannels(ctx context.Context, g *errgroup.Group, configs map[string]config.ChannelConfig) ([]channel.Channel, error) {
+func createChannels(ctx context.Context, g *errgroup.Group, configs map[string]config.ChannelConfig, webhookHandler *ntfy.WebhookHandler) ([]channel.Channel, error) {
 	addDbus := func(name string) (channel.Channel, error) {
 		dbusCh := dbus.NewNotifyChannel()
 		ok, err := dbusCh.IsAvailable(ctx)
@@ -396,12 +418,16 @@ func createChannels(ctx context.Context, g *errgroup.Group, configs map[string]c
 			}
 		case "ntfy":
 			ntfyCh, err := ntfy.New(ntfy.Config{
-				Server: chCfg.Server,
-				Topic:  chCfg.Topic,
-				Token:  chCfg.Token,
+				Server:     chCfg.Server,
+				Topic:      chCfg.Topic,
+				Token:      chCfg.Token,
+				WebhookURL: chCfg.WebhookURL,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("init ntfy channel %s: %w", name, err)
+			}
+			if webhookHandler != nil {
+				ntfyCh.SetWebhookHandler(webhookHandler)
 			}
 			channels = append(channels, ntfyCh)
 		default:

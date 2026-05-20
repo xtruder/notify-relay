@@ -39,7 +39,7 @@ Use "notify-relay serve" to start the relay daemon.`,
 
 	f := cmd.Flags()
 	f.StringP("urgency", "u", "", "Urgency level: low, normal, critical")
-	f.Int32P("expire-time", "t", -1, "Timeout in milliseconds")
+	f.Duration("expire-time", 0, "Notification timeout (e.g. 30s, 5m, 1h)")
 	f.StringP("icon", "i", "", "Icon path or icon name")
 	f.StringP("category", "c", "", "Notification category hint")
 	f.StringArrayP("hint", "H", nil, "Custom typed hint (TYPE:NAME:VALUE)")

@@ -1,434 +1,236 @@
-# notify-relay v0.3.0
+# notify-relay
 
-Distributed notification relay supporting desktop-to-desktop and desktop-to-phone forwarding with gRPC.
+Peer-to-peer notification relay built on [libp2p](https://libp2p.io). Sync notifications across your desktop, laptop, and phone using a shared secret channel — no central server required.
 
 ## Overview
 
-`notify-relay` forwards notifications between machines using gRPC bidirectional streaming. Each daemon instance can:
+`notify-relay` connects your devices into a private p2p mesh. Send a notification on any device, and it's broadcast to all your other devices over an encrypted pub/sub channel. Each node decides locally whether to display the notification based on its own state (screen locked? has a display? what's its priority?).
 
-- Accept incoming connections from other machines (**inbound remotes**)
-- Connect to other machines (**outbound remotes**)
-- Route notifications intelligently based on remote lock state
-- Send notifications to local desktop (dbus) or phone (ntfy.sh)
+- **Encrypted pub/sub** over libp2p GossipSub (XChaCha20-Poly1305 via channel-derived key)
+- **Shared-secret channel** — a 5-word ID like `acid-bold-crew-dome-fork` is the only thing your devices need to share
+- **LAN discovery** via mDNS, **WAN discovery** via IPFS DHT rendezvous through bootstrap peers
+- **NAT traversal** via libp2p AutoRelay through your own VPS or public relays
+- **Peer-aware routing**: each node sees who else is "present" (unlocked + has a display) and decides whether to act
+- **VPS as last-resort forwarder**: route to ntfy.sh (and your phone) only when no desktop/laptop is available
+- **Drop-in `notify-send` compatibility** via local gRPC API + `notify-relay` CLI
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MACHINE A (Office Desktop)                   │
-│  ┌──────────┐    ┌──────────────┐    ┌─────────────────────┐   │
-│  │  Proxy   │───►│ gRPC Server  │───►│ Router              │   │
-│  └──────────┘    └──────────────┘    │ ├─ Remote unlocked   │   │
-│                                      │ ├─ Screen locked     │   │
-│  ┌──────────┐    ┌──────────────┐    │ └─ Always (dbus)    │   │
-│  │ Outbound │───►│ Remote Mgr   │    └─────────────────────┘   │
-│  │ (backup) │    └──────────────┘                               │
-│  └──────────┘                                                   │
-└─────────────────────────────────────────────────────────────────┘
-         ▲                           ▲
-         │                           │
-    gRPC │ stream              gRPC  │ stream
-         │                           │
-         ▼                           ▼
-┌──────────────────┐         ┌──────────────────┐
-│   MACHINE B      │         │   MACHINE C      │
-│ (Backup Server)  │         │ (Laptop at home) │
-│ ┌──────────────┐ │         │ ┌──────────────┐ │
-│ │ gRPC Server  │ │         │ │ gRPC Client  │ │
-│ └──────────────┘ │         │ │ (connects)   │ │
-└──────────────────┘         └──────────────────┘
+┌────────────┐         ┌────────────┐         ┌────────────┐
+│  Desktop   │         │   Laptop   │         │    VPS     │
+│ priority=1 │         │ priority=2 │         │ priority=50│
+│ dbus       │         │ dbus       │         │ ntfy.sh    │
+└─────┬──────┘         └─────┬──────┘         └─────┬──────┘
+      │                      │                      │
+      └──────────── encrypted GossipSub ────────────┘
+                    (mDNS on LAN, DHT on WAN)
+
+Local notification flow:
+  notify-relay send "Hello"
+       │
+       ▼ (Unix socket gRPC)
+  notify-relay daemon
+       │
+       ├─► local router (display via dbus if best_active)
+       │
+       └─► pub/sub broadcast to channel
+                  │
+                  ▼
+       remote daemons (each runs its own router,
+                       decides locally to act or skip)
 ```
+
+A notification is broadcast to every node. Each node's router evaluates conditions against its peer table — only the right node(s) act. There's no leader election, no claim protocol; routing is just deterministic local logic.
 
 ## Quick Start
 
 ```bash
-# Simple local-only notifications
-notify-relayd
+# Build
+go build -o notify-relay ./cmd/notify-relay
 
-# With phone notifications when screen locked
-notify-relayd --ntfy-topic my-phone
+# First run generates ~/.config/notify-relay.toml with a fresh channel ID:
+./notify-relay serve
+# → Generated channel ID: acid-bold-crew-dome-fork
+# → Configure the same channel on your other devices
 
-# Full distributed setup with config
-notify-relayd --config ~/.config/notify-relay.jsonc
+# On another device, edit ~/.config/notify-relay.toml and set the same channel,
+# then run:
+./notify-relay serve
+
+# Send a notification (uses the local gRPC API):
+./notify-relay "Hello" "from anywhere"
 ```
+
+The `notify-relay` binary acts as a `notify-send`-compatible client when invoked without `serve`. Drop it in as `/usr/bin/notify-send` symlink for transparent integration.
+
+## How Routing Works
+
+Each node is configured with:
+- A **priority number** (lower = higher priority — `1` for your main desktop, `50` for the VPS)
+- **Routes**: ordered list of `(condition, channel)` pairs evaluated on every received notification
+
+When a notification arrives, the router walks the routes in order and runs the first one whose condition is true. The available conditions:
+
+| Condition | Matches when |
+|-----------|--------------|
+| `best_active` | This node is the lowest-priority-number node that is currently *present* (has a working dbus channel AND screen is unlocked). Tiebreak by peer ID. |
+| `no_better_peer` | No *present* node exists anywhere in the mesh, AND this node has the highest priority number (last-resort forwarder). |
+| `remote_present` | At least one remote peer is present. |
+| `remote_available` | At least one remote peer is reachable. |
+| `screen_locked` | Local screen is locked. |
+| `always` | Always matches (use as fallback). |
+
+**Presence** = `has_dbus && !screen_locked`. It's published over the dedicated presence pub/sub topic with a periodic heartbeat (10s) and stale timeout (30s).
+
+### Typical setup
+
+- **Desktop** (priority `1`): `best_active` → `dbus`. Displays notifications when unlocked.
+- **Laptop** (priority `2`): `best_active` → `dbus`. Displays only when desktop is locked.
+- **VPS** (priority `50`, `--relay`): `no_better_peer` → `ntfy`. Pushes to your phone when nothing else is around.
 
 ## Configuration
 
-Configuration is loaded using [viper](https://github.com/spf13/viper) with support for:
-- **Config files**: JSONC (JSON with comments)
-- **Environment variables**: `NOTIFY_RELAY_*` prefix
-- **Command-line flags**: Override all other sources
+Config lives at `~/.config/notify-relay.toml` (TOML format with inline comments). The first `serve` run generates a default config with a fresh random channel ID.
 
-Configuration hierarchy (higher = higher priority):
-1. CLI flags
-2. Environment variables
-3. Config file
-4. Defaults
+### Minimal example
 
-Default config location: `~/.config/notify-relay.jsonc`
+```toml
+[p2p]
+channel = "acid-bold-crew-dome-fork"
+priority = 1
 
-### JSONC Support
+[server]
+unix = "/run/user/1000/notify-relay.sock"
 
-Config files support JSONC format which allows comments (`//` and `/* */`) in your configuration:
+[channels.dbus]
+type = "dbus"
 
-```jsonc
-{
-  // This is a comment
-  "server": {
-    "listen": "127.0.0.1:8787"
-  }
-}
+[[routes]]
+condition = "best_active"
+channel = "dbus"
 ```
 
-### Minimal Example (local only)
+### Desktop + Laptop + VPS
 
-```jsonc
-{
-  // Unix socket for local communication
-  "server": {
-    "unix": "/run/user/1000/notify-relay.sock"
-  },
-  "channels": {
-    "dbus": { "type": "dbus" }
-  },
-  // Routes are an array - order matters! First match wins.
-  "routes": [
-    { "condition": "always", "channel": "dbus" }
-  ]
-}
+**Desktop** (`~/.config/notify-relay.toml`):
+```toml
+[p2p]
+channel = "acid-bold-crew-dome-fork"
+priority = 1
+bootstrap = ["/ip4/your-vps-ip/tcp/4001/p2p/12D3KooW..."]
+
+[server]
+unix = "/run/user/1000/notify-relay.sock"
+
+[channels.dbus]
+type = "dbus"
+
+[[routes]]
+condition = "best_active"
+channel = "dbus"
 ```
 
-### Server with Inbound Remotes
+**Laptop**: same as desktop but `priority = 2`.
 
-Accepts connections from laptops via forwarded sockets:
+**VPS** (run with `notify-relay serve --relay`):
+```toml
+[p2p]
+channel = "acid-bold-crew-dome-fork"
+priority = 50
+listen = ["/ip4/0.0.0.0/tcp/4001"]
 
-```jsonc
-{
-  // Server configuration
-  "server": {
-    "listen": "0.0.0.0:8787",
-    "token": "secret-token"
-  },
-  "channels": {
-    "dbus": { "type": "dbus" },
-    "phone": {
-      "type": "ntfy",
-      "config": { "topic": "server-alerts" }
-    }
-  },
-  "routes": [
-    // Order matters! First match wins.
-    { "condition": "remote_unlocked", "channel": "forward" },
-    { "condition": "screen_locked", "channel": "phone" },
-    // Always route should be last as a fallback
-    { "condition": "always", "channel": "dbus" }
-  ],
-  // Remotes are now a map (key = remote name, name field auto-populated)
-  "remotes": {
-    "laptop-work": {
-      "type": "inbound",
-      "socket": "/run/user/1000/notify-relay-laptop-work.sock",
-      "priority": 1
-    },
-    "laptop-personal": {
-      "type": "inbound",
-      "socket": "/run/user/1000/notify-relay-laptop-personal.sock",
-      "priority": 2
-    }
-  }
-}
+[channels.phone]
+type = "ntfy"
+server = "https://ntfy.sh"
+topic = "my-private-topic"
+
+[[routes]]
+condition = "no_better_peer"
+channel = "phone"
 ```
 
-### Laptop with Outbound Remote
-
-Connects to a server:
-
-```jsonc
-{
-  "server": {
-    "unix": "/run/user/1000/notify-relay.sock"
-  },
-  "channels": {
-    "dbus": { "type": "dbus" },
-    "phone": {
-      "type": "ntfy",
-      "config": { "topic": "my-alerts" }
-    }
-  },
-  "routes": [
-    { "condition": "screen_locked", "channel": "phone" },
-    { "condition": "always", "channel": "dbus" }
-  ],
-  "remotes": {
-    "office-server": {
-      "type": "outbound",
-      "host": "office.example.com:8787",
-      "token": "secret-token"
-    }
-  }
-}
-```
-
-### Hub-and-Spoke Setup
-
-Machine that connects to multiple servers AND accepts connections:
-
-```jsonc
-{
-  "server": {
-    "listen": "0.0.0.0:8787",
-    "token": "hub-token"
-  },
-  "remotes": {
-    "office-server": {
-      "type": "outbound",
-      "host": "office.internal:8787",
-      "token": "office-token",
-      "priority": 1
-    },
-    "home-server": {
-      "type": "outbound",
-      "host": "home.local:8787",
-      "token": "home-token",
-      "priority": 2
-    }
-  },
-  "channels": {
-    "dbus": { "type": "dbus" }
-  },
-  "routes": [
-    { "condition": "remote_unlocked", "channel": "forward" },
-    { "condition": "always", "channel": "dbus" }
-  ]
-}
-```
+The VPS acts as both a **circuit relay** (for NAT traversal between your other devices) and a **participant** in the channel (last-resort forwarder to your phone).
 
 ## Configuration Reference
 
-### Server Settings (`server`)
-
-| Field | Description | Environment Variable |
-|-------|-------------|---------------------|
-| `listen` | TCP address to listen on (e.g., `0.0.0.0:8787`) | `NOTIFY_RELAY_SERVER_LISTEN` |
-| `unix` | Unix socket path (e.g., `/run/user/1000/notify-relay.sock`) | `NOTIFY_RELAY_SERVER_UNIX` |
-| `token` | Bearer token for authentication | `NOTIFY_RELAY_SERVER_TOKEN` |
-| `token_file` | Path to file containing bearer token | `NOTIFY_RELAY_SERVER_TOKEN_FILE` |
-
-### Remotes (`remotes{}`)
-
-Remotes are defined as a map where the key is the remote name. The `name` field is automatically populated from the map key and doesn't need to be specified:
-
-```jsonc
-{
-  "remotes": {
-    "remote-name": {
-      "type": "outbound",
-      "host": "server:8787",
-      "token": "secret",
-      "priority": 1
-    }
-  }
-}
-```
+### `[p2p]`
 
 | Field | Description |
 |-------|-------------|
-| `type` | `"inbound"` (accept connections) or `"outbound"` (connect to) |
-| `socket` | For inbound: path to watch for forwarded sockets |
-| `host` | For outbound: server address (e.g., `server:8787`) |
-| `token` | For outbound: authentication token |
-| `priority` | Routing priority (lower = higher priority) |
+| `channel` | Shared secret channel ID. Must match across all your devices. |
+| `priority` | Routing priority. Lower = higher priority. |
+| `listen` | Multiaddrs to listen on. Defaults to `/ip4/0.0.0.0/tcp/0` (random port). |
+| `identity_path` | File path for persistent ed25519 identity key. |
+| `mdns` | Enable mDNS LAN discovery (default `true`). |
+| `bootstrap` | Bootstrap peers for WAN discovery. Empty = use IPFS public DHT. |
 
-### Channels (`channels{}`)
+### `[server]`
 
-| Type | Config |
+| Field | Description |
+|-------|-------------|
+| `listen` | TCP address for local gRPC API (optional). |
+| `unix` | Unix socket path for local gRPC API. |
+| `token` | Bearer token for `listen` mode. Auto-generated if not set. |
+| `token_file` | File containing/storing the bearer token. |
+
+### `[channels.<name>]`
+
+| Type | Fields |
 |------|--------|
-| `dbus` | None needed |
-| `ntfy` | `{ "server": "https://ntfy.sh", "topic": "my-topic", "token": "..." }` |
+| `dbus` | (none — uses `org.freedesktop.Notifications`) |
+| `ntfy` | `server`, `topic`, `token` (optional) |
 
-### Routes (`routes[]`)
+### `[[routes]]`
 
-Routes are defined as an **array** where order matters - the first matching route wins. This ensures predictable routing behavior.
+Ordered list. First matching condition wins. See conditions table above.
 
-```jsonc
-{
-  "routes": [
-    // Check if any remote is unlocked - forward to it
-    { "condition": "remote_unlocked", "channel": "forward" },
-    // If screen is locked, send to phone
-    { "condition": "screen_locked", "channel": "phone" },
-    // Always route should be last as the fallback
-    { "condition": "always", "channel": "dbus" }
-  ]
-}
-```
+## CLI
 
-**Via Environment Variable:**
+### `notify-relay serve`
 
-You can set routes via env var using a JSON array string:
-
-```bash
-NOTIFY_RELAY_ROUTES='[{"condition":"remote_unlocked","channel":"forward"},{"condition":"screen_locked","channel":"phone"},{"condition":"always","channel":"dbus"}]'
-```
-
-| Condition | Description |
-|-----------|-------------|
-| `always` | Always matches (use as fallback) |
-| `screen_locked` | Matches when local screen is locked |
-| `remote_available` | Matches when any remote is connected |
-| `remote_unlocked` | Matches when any remote has unlocked screen |
-
-## CLI Flags
+Start the daemon.
 
 ```
---listen string        TCP listen address (default: "127.0.0.1:8787")
---unix string          Unix socket path
---token string         Bearer token for authentication
---token-file string    File containing bearer token
---config string        Configuration file (default: ~/.config/notify-relay.jsonc)
---ntfy-topic string    ntfy.sh topic (enables phone notifications)
---version              Show version
+--config <path>       Config file (default: ~/.config/notify-relay.toml)
+--channel <id>        Override p2p.channel
+--priority <n>        Override p2p.priority
+--listen <addr>       Override server.listen
+--unix <path>         Override server.unix
+--token <token>       Override server.token
+--token-file <path>   Override server.token_file
+--ntfy-topic <topic>  Add an ntfy channel + no_better_peer route
+--relay               Run as circuit relay (combine with --channel for relay+participant)
+--save                Persist CLI overrides to the config file
 ```
 
-## Environment Variables
+### `notify-relay [send args]`
 
-All configuration options can be set via environment variables with the `NOTIFY_RELAY_` prefix. Viper automatically converts config keys to environment variable names:
+Without a subcommand, acts as a `notify-send`-compatible client over the local socket.
 
-```bash
-# Server settings
-NOTIFY_RELAY_SERVER_LISTEN=0.0.0.0:8787
-NOTIFY_RELAY_SERVER_UNIX=/run/user/1000/notify-relay.sock
-NOTIFY_RELAY_SERVER_TOKEN=secret-token
-NOTIFY_RELAY_SERVER_TOKEN_FILE=/etc/notify-relay/token
-
-# Channel settings (for simple channels)
-NOTIFY_RELAY_CHANNELS_DBUS_TYPE=dbus
-NOTIFY_RELAY_CHANNELS_PHONE_TYPE=ntfy
-NOTIFY_RELAY_CHANNELS_PHONE_CONFIG_TOPIC=my-alerts
-
-# Config file path
-NOTIFY_RELAY_CONFIG=/etc/notify-relay/config.jsonc
-
-# CLI-only options
-NOTIFY_RELAY_NTFY_TOPIC=my-phone-alerts
-
-# Arrays via JSON strings (for routes and remotes)
-NOTIFY_RELAY_ROUTES='[{"condition":"remote_unlocked","channel":"forward"},{"condition":"always","channel":"dbus"}]'
-NOTIFY_RELAY_REMOTES='[{"name":"office","type":"outbound","host":"server:8787","token":"secret"}]'
+```
+notify-relay "Summary" "Optional body"
+notify-relay --urgency=critical --icon=dialog-error "Build failed"
+notify-relay --action=open=Open --wait "Update ready"   # wait for action reply
 ```
 
-**JSON Arrays in Environment Variables:**
+## Security Model
 
-For ordered arrays like `routes[]`, you can provide a JSON array string:
+- Channel ID acts as a **pre-shared secret**. Anyone who knows it can join the mesh.
+- Pub/sub messages are encrypted with a key derived from the channel ID via HKDF (XChaCha20-Poly1305).
+- The GossipSub topic validator rejects any message that fails to decrypt, so non-members are pruned from the mesh.
+- libp2p identities are ed25519 keypairs; the underlying transport is TLS/Noise.
 
-```bash
-NOTIFY_RELAY_ROUTES='[
-  {"condition": "remote_unlocked", "channel": "forward"},
-  {"condition": "screen_locked", "channel": "phone"},
-  {"condition": "always", "channel": "dbus"}
-]'
-```
-
-For maps like `remotes{}`, you can also use a JSON array - it will be converted to a map internally:
-
-```bash
-NOTIFY_RELAY_REMOTES='[
-  {"name": "office", "type": "outbound", "host": "office.example.com:8787", "token": "secret"},
-  {"name": "backup", "type": "outbound", "host": "backup.local:8787"}
-]'
-```
-
-## Usage Examples
-
-### Local Development
-
-```bash
-# Terminal 1: Start daemon
-notify-relayd
-
-# Terminal 2: Send notification
-notify-send-proxy "Build finished" "Tests passed"
-```
-
-### Office Desktop with Laptop
-
-**Desktop (office):**
-```bash
-notify-relayd --listen 0.0.0.0:8787 --token my-secret
-```
-
-**Laptop (via SSH tunnel):**
-```bash
-ssh -L 8787:localhost:8787 office-desktop &
-notify-relayd --config laptop.jsonc
-```
-
-Where `laptop.jsonc`:
-```jsonc
-{
-  "server": { "unix": "/run/user/1000/notify-relay.sock" },
-  "remotes": {
-    "office": {
-      "type": "outbound",
-      "host": "localhost:8787",
-      "token": "my-secret"
-    }
-  }
-}
-```
-
-**Result:**
-- When laptop is unlocked: notifications appear on laptop
-- When laptop is locked: notifications go to phone via ntfy.sh
-
-### SSH RemoteForward Setup
-
-Forward laptop's socket to the server via SSH:
-
-**Laptop:**
-```bash
-notify-relayd --config laptop.json
-```
-
-**Server `.ssh/config`:**
-```
-Host laptop
-  HostName laptop.local
-  RemoteForward /run/user/1000/notify-relay-laptop.sock /run/user/1000/notify-relay.sock
-```
-
-**Server config:**
-```jsonc
-{
-  "server": { "listen": "0.0.0.0:8787" },
-  "remotes": {
-    "laptop": {
-      "type": "inbound",
-      "socket": "/run/user/1000/notify-relay-laptop.sock",
-      "priority": 1
-    }
-  }
-}
-```
-
-## Protocol
-
-Uses gRPC bidirectional streaming:
-
-- `Connect` - Bidirectional stream for real-time lock state and notification forwarding
-- `Notify` - Send notification
-- `CloseNotification` - Close a notification
-- `GetCapabilities` - Query capabilities
-- `GetServerInfo` - Query server information
-
-See `proto/notify_relay/v1/relay.proto` for full definition.
+Treat the channel ID like a password — anyone with it can both send and receive your notifications.
 
 ## Development
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for:
-- Building from source
-- Running tests
-- Protocol buffer generation
+```bash
+go build ./...
+go test ./...
+```
+
+See `internal/p2p/`, `internal/router/`, and `internal/tests/network_test.go` for the core implementation and end-to-end tests covering multi-node routing scenarios (presence, priority tiebreak, relay+participant, DHT discovery, channel isolation).
 
 ## License
 

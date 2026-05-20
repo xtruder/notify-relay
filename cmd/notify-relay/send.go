@@ -14,8 +14,10 @@ import (
 	notify_relayv1 "github.com/xtruder/notify-relay/internal/proto/notify_relay/v1"
 	"github.com/xtruder/notify-relay/internal/protocol"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -30,7 +32,10 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	req.AppName, _ = f.GetString("app-name")
 	req.AppIcon, _ = f.GetString("icon")
-	req.ExpireTimeout, _ = f.GetInt32("expire-time")
+	expireDur, _ := f.GetDuration("expire-time")
+	if expireDur > 0 {
+		req.ExpireTimeout = int32(expireDur.Milliseconds())
+	}
 	req.ReplacesID, _ = f.GetUint32("replace-id")
 	req.PrintID, _ = f.GetBool("print-id")
 	req.Wait, _ = f.GetBool("wait")
@@ -66,9 +71,16 @@ func runSend(cmd *cobra.Command, args []string) error {
 		req.Actions = append(req.Actions, key, label)
 	}
 
+	if len(req.Actions) > 0 && !req.Wait {
+		fmt.Fprintln(os.Stderr, "warn: actions require --wait to receive callbacks; buttons will not be shown")
+	}
+
 	endpoint, token := relayTarget()
 	resp, err := sendNotification(endpoint, token, req)
 	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.DeadlineExceeded {
+			return fmt.Errorf("timed out waiting for action")
+		}
 		if os.Getenv("NOTIFY_SEND_FALLBACK") == "1" {
 			code, fallbackErr := fallbackNotifySend(os.Args[1:])
 			if fallbackErr != nil {
@@ -147,7 +159,15 @@ func relayTarget() (string, string) {
 }
 
 func sendNotification(endpoint, token string, req protocol.NotifyRequest) (protocol.NotifyResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 30 * time.Second
+	if req.Wait {
+		if req.ExpireTimeout > 0 {
+			timeout = time.Duration(req.ExpireTimeout) * time.Millisecond
+		} else {
+			timeout = 1 * time.Hour
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	var opts []grpc.DialOption

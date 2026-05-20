@@ -17,10 +17,11 @@ import (
 // ChannelConfig holds configuration for a single notification channel.
 // For ntfy channels, Server and Topic are used directly.
 type ChannelConfig struct {
-	Type   string `toml:"type" comment:"Channel type: 'dbus' or 'ntfy'"`
-	Server string `toml:"server,omitempty" comment:"ntfy server URL (ntfy channels only)"`
-	Topic  string `toml:"topic,omitempty" comment:"ntfy topic name (ntfy channels only)"`
-	Token  string `toml:"token,omitempty" comment:"ntfy access token (optional)"`
+	Type       string `toml:"type" comment:"Channel type: 'dbus' or 'ntfy'"`
+	Server     string `toml:"server,omitempty" comment:"ntfy server URL (ntfy channels only)"`
+	Topic      string `toml:"topic,omitempty" comment:"ntfy topic name (ntfy channels only)"`
+	Token      string `toml:"token,omitempty" comment:"ntfy access token (optional)"`
+	WebhookURL string `toml:"webhook_url,omitempty" comment:"public URL for ntfy action callbacks (optional)"`
 }
 
 // ServerConfig re-exports server.Config for convenience.
