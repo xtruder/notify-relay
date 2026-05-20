@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -143,11 +142,10 @@ func relayTarget() (string, string) {
 	if socketPath := os.Getenv("NOTIFY_RELAY_SOCKET"); socketPath != "" {
 		return socketPath, ""
 	}
-	if runtime.GOOS == "linux" {
-		socketPath := fmt.Sprintf("/run/user/%d/notify-relay.sock", os.Getuid())
-		if _, err := os.Stat(socketPath); err == nil {
-			return socketPath, ""
-		}
+	home, _ := os.UserHomeDir()
+	socketPath := filepath.Join(home, ".local", "share", "notify-relay.sock")
+	if _, err := os.Stat(socketPath); err == nil {
+		return socketPath, ""
 	}
 
 	endpoint := os.Getenv("NOTIFY_RELAY_URL")

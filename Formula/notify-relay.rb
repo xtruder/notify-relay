@@ -17,7 +17,9 @@ class NotifyRelay < Formula
     ]
 
     system "go", "build", *std_go_args(ldflags: ldflags), "./cmd/notify-relay"
-    pkgshare.install "packaging/systemd/notify-relayd.service"
+    if OS.linux?
+      pkgshare.install "packaging/systemd/notify-relayd.service"
+    end
   end
 
   test do
@@ -26,10 +28,7 @@ class NotifyRelay < Formula
 
   def caveats
     <<~EOS
-      `notify-relay` works on Linux and macOS clients.
-      The `serve` subcommand talks to org.freedesktop.Notifications and is intended for Linux hosts.
-      The packaged systemd unit is installed at:
-        #{pkgshare}/notify-relayd.service
+      `notify-relay` works on Linux and macOS.
       If you want it to replace `notify-send`, create a symlink manually:
         ln -s #{opt_bin}/notify-relay #{HOMEBREW_PREFIX}/bin/notify-send
     EOS

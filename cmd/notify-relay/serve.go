@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -19,9 +20,9 @@ import (
 
 	"github.com/xtruder/notify-relay/internal/channel"
 	"github.com/xtruder/notify-relay/internal/config"
-	"github.com/xtruder/notify-relay/internal/dbus"
 	"github.com/xtruder/notify-relay/internal/ntfy"
 	"github.com/xtruder/notify-relay/internal/p2p"
+	"github.com/xtruder/notify-relay/internal/platform"
 	"github.com/xtruder/notify-relay/internal/protocol"
 	"github.com/xtruder/notify-relay/internal/router"
 	"github.com/xtruder/notify-relay/internal/server"
@@ -160,7 +161,7 @@ func serve(cfg config.Config) error {
 	// end of serve collects the first non-nil error.
 	g, gctx := errgroup.WithContext(rootCtx)
 
-	lockDetector := dbus.NewLockDetector()
+	lockDetector := platform.NewLockDetector()
 	if ok, err := lockDetector.IsAvailable(gctx); err != nil || !ok {
 		if err != nil {
 			slog.Warn("lock detector unavailable", "error", err)
@@ -188,10 +189,11 @@ func serve(cfg config.Config) error {
 		return fmt.Errorf("init channels: %w", err)
 	}
 
-	hasDbus := false
+	displayName := platform.DisplayChannelName()
+	hasDisplay := false
 	for _, ch := range channels {
-		if ch.Name() == "dbus" {
-			hasDbus = true
+		if ch.Name() == displayName {
+			hasDisplay = true
 			break
 		}
 	}
@@ -199,7 +201,7 @@ func serve(cfg config.Config) error {
 	// isPresent returns whether this node can currently handle notifications:
 	// has a working display channel AND screen is unlocked.
 	isPresent := func() bool {
-		if !hasDbus {
+		if !hasDisplay {
 			return false
 		}
 		if lockDetector != nil && lockDetector.IsLocked() {
@@ -248,7 +250,7 @@ func serve(cfg config.Config) error {
 		lockDetector.SetChangeCallback(func(locked bool) {
 			slog.Debug("lock state changed", "locked", locked)
 			if node.Presence != nil {
-				node.Presence.SetPresent(context.Background(), !locked && hasDbus)
+				node.Presence.SetPresent(context.Background(), !locked && hasDisplay)
 			}
 		})
 	}
@@ -362,9 +364,10 @@ func (lr *localRouter) ServerInformation(ctx context.Context) (protocol.ServerIn
 
 func buildRouterConfig(routes []router.Route) router.Config {
 	if len(routes) == 0 {
+		display := platform.DisplayChannelName()
 		routes = []router.Route{
-			{Condition: "best_active", Channel: "dbus"},
-			{Condition: "always", Channel: "dbus"},
+			{Condition: "best_active", Channel: display},
+			{Condition: "always", Channel: display},
 		}
 	}
 	return router.Config{Routes: routes}
@@ -374,28 +377,28 @@ func buildRouterConfig(routes []router.Route) router.Config {
 // with a Start/Close lifecycle (e.g. dbus) are launched via the supplied
 // errgroup, which ties their lifetime to the rest of serve's services.
 func createChannels(ctx context.Context, g *errgroup.Group, configs map[string]config.ChannelConfig, webhookHandler *ntfy.WebhookHandler) ([]channel.Channel, error) {
-	addDbus := func(name string) (channel.Channel, error) {
-		dbusCh := dbus.NewNotifyChannel()
-		ok, err := dbusCh.IsAvailable(ctx)
+	addDisplay := func(name string) (platform.DisplayChannel, error) {
+		ch := platform.NewNotifyChannel()
+		ok, err := ch.IsAvailable(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("probe dbus channel %s: %w", name, err)
+			return nil, fmt.Errorf("probe display channel %s: %w", name, err)
 		}
 		if !ok {
-			slog.Warn("dbus notification service not available, skipping channel", "channel", name)
+			slog.Warn("display notification service not available, skipping channel", "channel", name)
 			return nil, nil
 		}
-		slog.Info("dbus notification channel available", "channel", name)
+		slog.Info("display notification channel available", "channel", name)
 		g.Go(func() error {
-			if err := dbusCh.Run(ctx); err != nil {
-				return fmt.Errorf("dbus channel %s: %w", name, err)
+			if err := ch.Run(ctx); err != nil {
+				return fmt.Errorf("display channel %s: %w", name, err)
 			}
 			return nil
 		})
-		return dbusCh, nil
+		return ch, nil
 	}
 
 	if len(configs) == 0 {
-		ch, err := addDbus("dbus")
+		ch, err := addDisplay(platform.DisplayChannelName())
 		if err != nil {
 			return nil, err
 		}
@@ -409,7 +412,23 @@ func createChannels(ctx context.Context, g *errgroup.Group, configs map[string]c
 	for name, chCfg := range configs {
 		switch chCfg.Type {
 		case "dbus":
-			ch, err := addDbus(name)
+			if runtime.GOOS != "linux" {
+				slog.Warn("dbus channel only supported on linux", "channel", name)
+				continue
+			}
+			ch, err := addDisplay(name)
+			if err != nil {
+				return nil, err
+			}
+			if ch != nil {
+				channels = append(channels, ch)
+			}
+		case "macos":
+			if runtime.GOOS != "darwin" {
+				slog.Warn("macos channel only supported on darwin", "channel", name)
+				continue
+			}
+			ch, err := addDisplay(name)
 			if err != nil {
 				return nil, err
 			}
