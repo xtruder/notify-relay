@@ -4,7 +4,6 @@ package macos
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"unsafe"
 

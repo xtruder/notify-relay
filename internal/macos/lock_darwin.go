@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/xtruder/notify-relay/internal/condition"
 )
 
 /*
